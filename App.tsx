@@ -337,7 +337,10 @@ export default function App() {
                 },
               };
 
-              appendLog(`connect params: ${JSON.stringify(connectParams)}`);
+              appendLog(
+                `connect params: role=[${connectParams.role}] client.id=[${connectParams.client.id}] client.mode=[${connectParams.client.mode}] platform=[${connectParams.client.platform}]`,
+              );
+              appendLog(`connect params json:\n${JSON.stringify(connectParams, null, 2)}`);
 
               const hello = await call("connect", connectParams);
                 minProtocol: 3,
