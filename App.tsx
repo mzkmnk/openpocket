@@ -305,12 +305,19 @@ export default function App() {
               // IMPORTANT: the token string used in the signature payload must match
               // the token actually sent in `auth.token`.
               // Prefer deviceToken once issued (like Control UI), otherwise fall back to gateway token.
-              const tokenForAuth = identityData.deviceToken || nextToken || undefined;
               const scopes = ["operator.admin", "operator.approvals", "operator.pairing"];
 
               // Match Control UI identifiers to satisfy signature verification.
               const clientId = "openclaw-control-ui";
               const clientMode = "webchat";
+
+              // IMPORTANT: OpenClaw Gateway token auth expects auth.token to be present.
+              // Also, the token string used in the signature payload must match auth.token.
+              // Prefer deviceToken once issued; otherwise require the gateway token.
+              const tokenForAuth = identityData.deviceToken || nextToken || "";
+              if (!tokenForAuth) {
+                throw new Error("Gateway token is required (auth.token). Paste your gateway token, then retry.");
+              }
 
               const signed = await makeSignature(identityData, {
                 nonce,
@@ -318,7 +325,7 @@ export default function App() {
                 clientMode,
                 role: "operator",
                 scopes,
-                token: tokenForAuth ?? "",
+                token: tokenForAuth,
               });
               const connectParams = {
                 minProtocol: 3,
