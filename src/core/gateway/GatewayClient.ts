@@ -1,3 +1,4 @@
+import { sanitizeForLog } from "../security/logSanitizer";
 import type {
   GatewayClientOptions,
   GatewayConnectInput,
@@ -67,56 +68,6 @@ function normalizeError(error: unknown): Error {
     return error;
   }
   return new Error(typeof error === "string" ? error : "Unknown gateway error");
-}
-
-/**
- * Masks secret text by exposing only its length.
- * 機密文字列を長さだけ残してマスクします。
- *
- * @param value - Secret string.
- *                機密文字列。
- * @returns Redacted string with length metadata.
- *          長さ情報のみを含むマスク文字列。
- */
-function sanitizeSecret(value: string): string {
-  return `<redacted:${value.length}>`;
-}
-
-/**
- * Recursively redacts token/password/secret fields for safe logging.
- * 安全なログ出力のため token/password/secret フィールドを再帰的にマスクします。
- *
- * @param input - Arbitrary value to sanitize.
- *                マスク対象の任意値。
- * @returns Sanitized value.
- *          マスク済みの値。
- */
-function sanitizeForLog(input: unknown): unknown {
-  if (typeof input === "string") {
-    return input;
-  }
-
-  if (Array.isArray(input)) {
-    return input.map(sanitizeForLog);
-  }
-
-  if (!isRecord(input)) {
-    return input;
-  }
-
-  const next: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input)) {
-    const lower = key.toLowerCase();
-    if (
-      typeof value === "string" &&
-      (lower.includes("token") || lower.includes("password") || lower.includes("secret"))
-    ) {
-      next[key] = sanitizeSecret(value);
-      continue;
-    }
-    next[key] = sanitizeForLog(value);
-  }
-  return next;
 }
 
 /**

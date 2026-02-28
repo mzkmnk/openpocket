@@ -77,7 +77,11 @@ describe("GatewayClient", () => {
 
     const connectPromise = client.connect({
       gatewayUrl: "wss://gateway.example.ts.net/",
-      buildConnectParams: () => ({ auth: { token: "secret" }, role: "operator" }),
+      buildConnectParams: () => ({
+        auth: { token: "secret", deviceToken: "device-token-1" },
+        device: { signature: "signature-value" },
+        role: "operator",
+      }),
     });
 
     const socket = sockets[0];
@@ -101,7 +105,11 @@ describe("GatewayClient", () => {
     await expect(reqPromise).resolves.toEqual({ sessions: ["s1"] });
 
     expect(logs.join("\n")).toContain("<redacted:6>");
+    expect(logs.join("\n")).toContain("<redacted:14>");
+    expect(logs.join("\n")).toContain("<redacted:15>");
     expect(logs.join("\n")).not.toContain("secret");
+    expect(logs.join("\n")).not.toContain("device-token-1");
+    expect(logs.join("\n")).not.toContain("signature-value");
   });
 
   // 指定イベント購読とワイルドカード購読の両方が動作すること
