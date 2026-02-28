@@ -538,7 +538,7 @@ export function ChatScreen() {
         </View>
         <Text style={styles.disclaimer}>OpenClaw can make mistakes. Verify important info.</Text>
       </View>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
     </SafeAreaView>
   );
 }
@@ -546,13 +546,13 @@ export function ChatScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#09090B",
+    backgroundColor: "#FFFFFF",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     borderBottomWidth: 1,
-    borderBottomColor: "#27272A",
+    borderBottomColor: "#E2E8F0",
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 10,
@@ -563,12 +563,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#111114",
+    backgroundColor: "#F8FAFC",
     borderWidth: 1,
-    borderColor: "#27272A",
+    borderColor: "#E2E8F0",
   },
   headerIcon: {
-    color: "#F4F4F5",
+    color: "#0F172A",
     fontSize: 16,
     fontFamily: "SpaceGrotesk_700Bold",
   },
@@ -578,7 +578,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
   },
   headerTitle: {
-    color: "#FAFAFA",
+    color: "#0F172A",
     fontSize: 14,
     fontFamily: "SpaceGrotesk_700Bold",
   },
@@ -595,7 +595,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#10B981",
   },
   statusText: {
-    color: "#A1A1AA",
+    color: "#64748B",
     fontSize: 10,
     fontFamily: "SpaceGrotesk_400Regular",
   },
@@ -604,18 +604,18 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#7F1D1D",
-    backgroundColor: "#2A1111",
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
     padding: 10,
   },
   errorTitle: {
-    color: "#FCA5A5",
+    color: "#B91C1C",
     fontFamily: "SpaceGrotesk_700Bold",
     fontSize: 12,
   },
   errorBody: {
     marginTop: 2,
-    color: "#FECACA",
+    color: "#7F1D1D",
     fontFamily: "SpaceGrotesk_400Regular",
     fontSize: 12,
   },
@@ -626,7 +626,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   centerStateTitle: {
-    color: "#E4E4E7",
+    color: "#334155",
     fontFamily: "SpaceGrotesk_500Medium",
     fontSize: 14,
   },
@@ -642,18 +642,18 @@ const styles = StyleSheet.create({
   emptyStateWrap: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#3F3F46",
-    backgroundColor: "#18181B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
     padding: 16,
     gap: 4,
   },
   emptyStateTitle: {
-    color: "#FAFAFA",
+    color: "#0F172A",
     fontFamily: "SpaceGrotesk_700Bold",
     fontSize: 13,
   },
   emptyStateBody: {
-    color: "#A1A1AA",
+    color: "#64748B",
     fontFamily: "SpaceGrotesk_400Regular",
     fontSize: 12,
   },
@@ -677,15 +677,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   avatarAssistant: {
-    backgroundColor: "#1A1A20",
-    borderColor: "#3F3F46",
+    backgroundColor: "#DBEAFE",
+    borderColor: "#BFDBFE",
   },
   avatarUser: {
-    backgroundColor: "#10233F",
-    borderColor: "#1E3A8A",
+    backgroundColor: "#DBEAFE",
+    borderColor: "#93C5FD",
   },
   avatarText: {
-    color: "#FAFAFA",
+    color: "#1E3A8A",
     fontFamily: "SpaceGrotesk_700Bold",
     fontSize: 10,
   },
@@ -705,12 +705,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   metaAuthor: {
-    color: "#A1A1AA",
+    color: "#64748B",
     fontFamily: "SpaceGrotesk_500Medium",
     fontSize: 11,
   },
   metaTime: {
-    color: "#71717A",
+    color: "#94A3B8",
     fontFamily: "SpaceGrotesk_400Regular",
     fontSize: 10,
   },
@@ -721,8 +721,8 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   assistantBubble: {
-    backgroundColor: "#18181B",
-    borderColor: "#27272A",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E2E8F0",
     borderTopLeftRadius: 4,
   },
   userBubble: {
@@ -736,7 +736,7 @@ const styles = StyleSheet.create({
     fontFamily: "SpaceGrotesk_400Regular",
   },
   assistantBubbleText: {
-    color: "#F4F4F5",
+    color: "#0F172A",
   },
   userBubbleText: {
     color: "#FFFFFF",
@@ -747,8 +747,8 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     borderTopWidth: 1,
-    borderTopColor: "#27272A",
-    backgroundColor: "rgba(9, 9, 11, 0.96)",
+    borderTopColor: "#E2E8F0",
+    backgroundColor: "rgba(255, 255, 255, 0.96)",
     paddingHorizontal: 14,
     paddingTop: 8,
     paddingBottom: 12,
@@ -761,21 +761,21 @@ const styles = StyleSheet.create({
   quickAction: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#3F3F46",
-    backgroundColor: "#18181B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   quickActionText: {
-    color: "#E4E4E7",
+    color: "#334155",
     fontFamily: "SpaceGrotesk_500Medium",
     fontSize: 11,
   },
   inputWrap: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#3F3F46",
-    backgroundColor: "#18181B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
     paddingHorizontal: 6,
     paddingVertical: 6,
     flexDirection: "row",
@@ -786,7 +786,7 @@ const styles = StyleSheet.create({
     flex: 1,
     maxHeight: 120,
     minHeight: 34,
-    color: "#FAFAFA",
+    color: "#0F172A",
     fontSize: 14,
     lineHeight: 20,
     paddingVertical: 6,
@@ -816,19 +816,19 @@ const styles = StyleSheet.create({
     minWidth: 44,
     height: 34,
     paddingHorizontal: 12,
-    backgroundColor: "#7F1D1D",
+    backgroundColor: "#DC2626",
     alignItems: "center",
     justifyContent: "center",
   },
   abortButtonText: {
-    color: "#FEE2E2",
+    color: "#FFFFFF",
     fontSize: 12,
     fontFamily: "SpaceGrotesk_700Bold",
   },
   disclaimer: {
     marginTop: 8,
     textAlign: "center",
-    color: "#71717A",
+    color: "#94A3B8",
     fontFamily: "SpaceGrotesk_400Regular",
     fontSize: 10,
   },
