@@ -19,6 +19,18 @@ OpenClaw を **Tailnet（Tailscale）接続された端末のみ** から安全�
 ## Docs
 
 - 仕様書: [docs/spec.md](docs/spec.md)
+- Issue #3 検証手順: [docs/issue-3-poc-validation.md](docs/issue-3-poc-validation.md)
+
+## PoC Run (Issue #3)
+
+1. Install dependencies
+   - `pnpm install`
+2. Start Expo
+   - `pnpm start`
+3. Open app and validate flow
+   - gateway connect (`connect.challenge` -> `connect`)
+   - `sessions.list` + switch
+   - `chat.history`, `chat.send` (idempotencyKey), stream `delta/final`, `chat.abort`
 
 ## License
 
