@@ -335,7 +335,13 @@ export default function App() {
                 const ok = await (await import("./src/poc/identity")).verifySignature(identityData, signed.payload, signed.signature);
                 const pubBytes = base64UrlToBytes(identityData.publicKey);
                 const sigBytes = base64UrlToBytes(signed.signature);
-                appendLog(`device-auth self-check verify=${ok} pubLen=${pubBytes.length} sigLen=${sigBytes.length}`);
+                const dbg = signed.debug;
+                appendLog(
+                  `device-auth self-check verify=${ok} pubLen=${pubBytes.length} sigLen=${sigBytes.length}` +
+                    (dbg
+                      ? ` rawVerify=${dbg.verifyRaw} rawPubLen=${dbg.pubLen} rawSigLen=${dbg.sigLen} sigRoundtripOk=${dbg.sigRoundtripOk}`
+                      : ""),
+                );
                 appendLog(`device-auth payload(v2 masked): ${maskedPayload}`);
               } catch (e) {
                 appendLog(`device-auth self-check error: ${String(e)}`);

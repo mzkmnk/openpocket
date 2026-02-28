@@ -171,7 +171,17 @@ export async function makeSignature(
     scopes: string[];
     token?: string;
   },
-): Promise<{ signature: string; signedAt: number; payload: string }> {
+): Promise<{
+  signature: string;
+  signedAt: number;
+  payload: string;
+  debug?: {
+    verifyRaw: boolean;
+    pubLen: number;
+    sigLen: number;
+    sigRoundtripOk: boolean;
+  };
+}> {
   const signedAt = Date.now();
   const payload = signaturePayloadV2({
     deviceId: identity.deviceId,
@@ -188,9 +198,23 @@ export async function makeSignature(
   const msg = new TextEncoder().encode(payload);
   const sig = await ed25519.signAsync(msg, secretKey);
 
+  // Debug: verify without base64 encoding to isolate failures.
+  let debug: { verifyRaw: boolean; pubLen: number; sigLen: number; sigRoundtripOk: boolean } | undefined;
+  try {
+    const pubBytes = base64UrlToBytes(identity.publicKey);
+    const verifyRaw = await ed25519.verifyAsync(sig, msg, pubBytes);
+    const sigB64 = bytesToBase64Url(sig);
+    const sigRoundtrip = base64UrlToBytes(sigB64);
+    const sigRoundtripOk = sigRoundtrip.length === sig.length && sigRoundtrip.every((b, i) => b === sig[i]);
+    debug = { verifyRaw, pubLen: pubBytes.length, sigLen: sig.length, sigRoundtripOk };
+  } catch {
+    // ignore
+  }
+
   return {
     signature: bytesToBase64Url(sig),
     signedAt,
     payload,
+    debug,
   };
 }
