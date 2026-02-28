@@ -13,6 +13,7 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   SafeAreaView,
@@ -166,6 +167,12 @@ export function ChatScreen() {
   const activeRunIdRef = useRef<string | null>(null);
   const streamTextRef = useRef("");
   const messagesScrollRef = useRef<ScrollView | null>(null);
+  const initialScrollPendingRef = useRef(false);
+  const initialScrollRunningRef = useRef(false);
+  const initialScrollDoneRef = useRef(false);
+  const initialScrollRafRef = useRef<number | null>(null);
+  const contentHeightRef = useRef(0);
+  const viewportHeightRef = useRef(0);
 
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -177,10 +184,72 @@ export function ChatScreen() {
   const [connectionDetail, setConnectionDetail] = useState("Connecting to gateway...");
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
 
+  const cancelInitialScrollAnimation = useCallback(() => {
+    if (initialScrollRafRef.current !== null) {
+      cancelAnimationFrame(initialScrollRafRef.current);
+      initialScrollRafRef.current = null;
+    }
+    initialScrollRunningRef.current = false;
+  }, []);
+
   const scrollToBottom = useCallback((animated: boolean) => {
+    cancelInitialScrollAnimation();
     requestAnimationFrame(() => {
       messagesScrollRef.current?.scrollToEnd({ animated });
     });
+  }, [cancelInitialScrollAnimation]);
+
+  const maybeRunInitialScroll = useCallback(() => {
+    if (
+      !initialScrollPendingRef.current ||
+      initialScrollRunningRef.current ||
+      initialScrollDoneRef.current
+    ) {
+      return;
+    }
+
+    if (contentHeightRef.current <= 0 || viewportHeightRef.current <= 0) {
+      return;
+    }
+
+    const maxOffset = contentHeightRef.current - viewportHeightRef.current;
+    if (!Number.isFinite(maxOffset) || maxOffset <= 0) {
+      initialScrollPendingRef.current = false;
+      initialScrollDoneRef.current = true;
+      return;
+    }
+
+    const scrollView = messagesScrollRef.current;
+    if (!scrollView) {
+      return;
+    }
+
+    initialScrollRunningRef.current = true;
+    scrollView.scrollTo({ y: 0, animated: false });
+
+    const durationMs = Math.min(1800, Math.max(700, maxOffset * 0.55));
+    const startedAt = Date.now();
+
+    const tick = () => {
+      const elapsed = Date.now() - startedAt;
+      const progress = Math.min(1, elapsed / durationMs);
+      const eased = progress * progress * progress;
+      const y = maxOffset * eased;
+
+      scrollView.scrollTo({ y, animated: false });
+
+      if (progress >= 1) {
+        initialScrollRunningRef.current = false;
+        initialScrollPendingRef.current = false;
+        initialScrollDoneRef.current = true;
+        initialScrollRafRef.current = null;
+        return;
+      }
+
+      initialScrollRafRef.current = requestAnimationFrame(tick);
+    };
+
+    initialScrollRafRef.current = requestAnimationFrame(tick);
   }, []);
 
   const setStreamingText = useCallback((next: string) => {
@@ -253,6 +322,11 @@ export function ChatScreen() {
   const initialize = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage("");
+    cancelInitialScrollAnimation();
+    initialScrollPendingRef.current = false;
+    initialScrollDoneRef.current = false;
+    contentHeightRef.current = 0;
+    viewportHeightRef.current = 0;
 
     if (!sessionKey) {
       setErrorMessage("Session key is required. Please open chat from the sessions screen.");
@@ -304,7 +378,7 @@ export function ChatScreen() {
 
       const history = await service.getHistory({ sessionKey, limit: 200 });
       setMessages(mapHistoryMessages(history.messages));
-      scrollToBottom(false);
+      initialScrollPendingRef.current = true;
       setConnectionDetail("Connected");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to initialize chat");
@@ -312,7 +386,7 @@ export function ChatScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [onChatEvent, scrollToBottom, sessionKey, store]);
+  }, [cancelInitialScrollAnimation, onChatEvent, sessionKey, store]);
 
   const sendMessage = useCallback(async () => {
     const service = chatServiceRef.current;
@@ -376,6 +450,7 @@ export function ChatScreen() {
   useEffect(() => {
     void initialize();
     return () => {
+      cancelInitialScrollAnimation();
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
       activeRunIdRef.current = null;
@@ -383,7 +458,7 @@ export function ChatScreen() {
       clientRef.current = null;
       chatServiceRef.current = null;
     };
-  }, [initialize]);
+  }, [cancelInitialScrollAnimation, initialize]);
 
   if (!fontsLoaded) {
     return null;
@@ -391,170 +466,185 @@ export function ChatScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
-        <Pressable style={styles.headerIconButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.headerIcon}>←</Text>
-        </Pressable>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {sessionLabel}
-          </Text>
-          <View style={styles.statusRow}>
-            <View style={styles.onlineDot} />
-            <Text style={styles.statusText}>
-              {connectionDetail}
-              {identity ? ` • ${identity.deviceId.slice(0, 8)}...` : ""}
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
+        <View style={styles.header}>
+          <Pressable style={styles.headerIconButton} onPress={() => navigation.goBack()}>
+            <Text style={styles.headerIcon}>←</Text>
+          </Pressable>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {sessionLabel}
             </Text>
-          </View>
-        </View>
-        <Pressable style={styles.headerIconButton} onPress={() => void initialize()}>
-          <Text style={styles.headerIcon}>↻</Text>
-        </Pressable>
-      </View>
-
-      {errorMessage ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>Chat Error</Text>
-          <Text style={styles.errorBody}>{errorMessage}</Text>
-        </View>
-      ) : null}
-
-      {isLoading ? (
-        <View style={styles.centerState}>
-          <ActivityIndicator size="small" color="#3B82F6" />
-          <Text style={styles.centerStateTitle}>Loading chat history...</Text>
-        </View>
-      ) : (
-        <ScrollView
-          ref={messagesScrollRef}
-          contentContainerStyle={styles.messagesContent}
-          style={styles.messagesArea}
-          onContentSizeChange={() => scrollToBottom(false)}
-        >
-          {messages.length === 0 ? (
-            <View style={styles.emptyStateWrap}>
-              <Text style={styles.emptyStateTitle}>No messages yet</Text>
-              <Text style={styles.emptyStateBody}>
-                Send your first message to start this session.
+            <View style={styles.statusRow}>
+              <View style={styles.onlineDot} />
+              <Text style={styles.statusText}>
+                {connectionDetail}
+                {identity ? ` • ${identity.deviceId.slice(0, 8)}...` : ""}
               </Text>
             </View>
-          ) : null}
+          </View>
+          <Pressable style={styles.headerIconButton} onPress={() => void initialize()}>
+            <Text style={styles.headerIcon}>↻</Text>
+          </Pressable>
+        </View>
 
-          {messages.map((message) => {
-            const isAssistant = message.role === "assistant";
-            return (
-              <View
-                key={message.id}
-                style={[
-                  styles.messageRow,
-                  isAssistant ? styles.messageRowLeft : styles.messageRowRight,
-                ]}
-              >
-                {isAssistant ? (
-                  <View style={[styles.avatar, styles.avatarAssistant]}>
-                    <Text style={styles.avatarText}>{initialsForRole(message.role)}</Text>
-                  </View>
-                ) : null}
+        {errorMessage ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorTitle}>Chat Error</Text>
+            <Text style={styles.errorBody}>{errorMessage}</Text>
+          </View>
+        ) : null}
+
+        {isLoading ? (
+          <View style={styles.centerState}>
+            <ActivityIndicator size="small" color="#3B82F6" />
+            <Text style={styles.centerStateTitle}>Loading chat history...</Text>
+          </View>
+        ) : (
+          <ScrollView
+            ref={messagesScrollRef}
+            contentContainerStyle={styles.messagesContent}
+            style={styles.messagesArea}
+            keyboardShouldPersistTaps="handled"
+            onLayout={(event) => {
+              viewportHeightRef.current = event.nativeEvent.layout.height;
+              maybeRunInitialScroll();
+            }}
+            onContentSizeChange={(_width, height) => {
+              contentHeightRef.current = height;
+              maybeRunInitialScroll();
+            }}
+          >
+            {messages.length === 0 ? (
+              <View style={styles.emptyStateWrap}>
+                <Text style={styles.emptyStateTitle}>No messages yet</Text>
+                <Text style={styles.emptyStateBody}>
+                  Send your first message to start this session.
+                </Text>
+              </View>
+            ) : null}
+
+            {messages.map((message) => {
+              const isAssistant = message.role === "assistant";
+              return (
                 <View
+                  key={message.id}
                   style={[
-                    styles.messageColumn,
-                    isAssistant ? styles.messageColumnLeft : styles.messageColumnRight,
+                    styles.messageRow,
+                    isAssistant ? styles.messageRowLeft : styles.messageRowRight,
                   ]}
                 >
-                  <View style={styles.metaRow}>
-                    {isAssistant ? <Text style={styles.metaAuthor}>OpenClaw</Text> : null}
-                    <Text style={styles.metaTime}>{message.time}</Text>
-                    {!isAssistant ? <Text style={styles.metaAuthor}>You</Text> : null}
-                  </View>
+                  {isAssistant ? (
+                    <View style={[styles.avatar, styles.avatarAssistant]}>
+                      <Text style={styles.avatarText}>{initialsForRole(message.role)}</Text>
+                    </View>
+                  ) : null}
                   <View
                     style={[
-                      styles.bubble,
-                      isAssistant ? styles.assistantBubble : styles.userBubble,
+                      styles.messageColumn,
+                      isAssistant ? styles.messageColumnLeft : styles.messageColumnRight,
                     ]}
                   >
-                    <Text
+                    <View style={styles.metaRow}>
+                      {isAssistant ? <Text style={styles.metaAuthor}>OpenClaw</Text> : null}
+                      <Text style={styles.metaTime}>{message.time}</Text>
+                      {!isAssistant ? <Text style={styles.metaAuthor}>You</Text> : null}
+                    </View>
+                    <View
                       style={[
-                        styles.bubbleText,
-                        isAssistant ? styles.assistantBubbleText : styles.userBubbleText,
+                        styles.bubble,
+                        isAssistant ? styles.assistantBubble : styles.userBubble,
                       ]}
                     >
-                      {message.body}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.bubbleText,
+                          isAssistant ? styles.assistantBubbleText : styles.userBubbleText,
+                        ]}
+                      >
+                        {message.body}
+                      </Text>
+                    </View>
+                  </View>
+                  {!isAssistant ? (
+                    <View style={[styles.avatar, styles.avatarUser]}>
+                      <Text style={styles.avatarText}>{initialsForRole(message.role)}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+
+            {streamText.trim().length > 0 ? (
+              <View style={[styles.messageRow, styles.messageRowLeft]}>
+                <View style={[styles.avatar, styles.avatarAssistant]}>
+                  <Text style={styles.avatarText}>OC</Text>
+                </View>
+                <View style={[styles.messageColumn, styles.messageColumnLeft]}>
+                  <View style={styles.metaRow}>
+                    <Text style={styles.metaAuthor}>OpenClaw</Text>
+                    <Text style={styles.metaTime}>typing...</Text>
+                  </View>
+                  <View style={[styles.bubble, styles.assistantBubble]}>
+                    <Text style={[styles.bubbleText, styles.assistantBubbleText]}>{streamText}</Text>
                   </View>
                 </View>
-                {!isAssistant ? (
-                  <View style={[styles.avatar, styles.avatarUser]}>
-                    <Text style={styles.avatarText}>{initialsForRole(message.role)}</Text>
-                  </View>
-                ) : null}
               </View>
-            );
-          })}
+            ) : null}
+          </ScrollView>
+        )}
 
-          {streamText.trim().length > 0 ? (
-            <View style={[styles.messageRow, styles.messageRowLeft]}>
-              <View style={[styles.avatar, styles.avatarAssistant]}>
-                <Text style={styles.avatarText}>OC</Text>
-              </View>
-              <View style={[styles.messageColumn, styles.messageColumnLeft]}>
-                <View style={styles.metaRow}>
-                  <Text style={styles.metaAuthor}>OpenClaw</Text>
-                  <Text style={styles.metaTime}>typing...</Text>
-                </View>
-                <View style={[styles.bubble, styles.assistantBubble]}>
-                  <Text style={[styles.bubbleText, styles.assistantBubbleText]}>{streamText}</Text>
-                </View>
-              </View>
-            </View>
-          ) : null}
-        </ScrollView>
-      )}
+        <View style={styles.footer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickActionsWrap}
+            keyboardShouldPersistTaps="handled"
+          >
+            {quickActions.map((action) => (
+              <Pressable
+                key={action.id}
+                style={styles.quickAction}
+                onPress={() => setDraft(action.label)}
+              >
+                <Text style={styles.quickActionText}>{action.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
 
-      <View style={styles.footer}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.quickActionsWrap}
-        >
-          {quickActions.map((action) => (
-            <Pressable
-              key={action.id}
-              style={styles.quickAction}
-              onPress={() => setDraft(action.label)}
-            >
-              <Text style={styles.quickActionText}>{action.label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
-        <View style={styles.inputWrap}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Message OpenClaw..."
-            placeholderTextColor="#71717A"
-            style={styles.textInput}
-            multiline
-          />
-          {isStreaming ? (
-            <Pressable style={styles.abortButton} onPress={() => void abortMessage()}>
-              <Text style={styles.abortButtonText}>Stop</Text>
-            </Pressable>
-          ) : (
-            <Pressable
-              style={[
-                styles.sendButton,
-                draft.trim().length === 0 || isSending ? styles.sendButtonDisabled : null,
-              ]}
-              onPress={() => void sendMessage()}
-              disabled={draft.trim().length === 0 || isSending}
-            >
-              <Text style={styles.sendButtonText}>{isSending ? "..." : "↑"}</Text>
-            </Pressable>
-          )}
+          <View style={styles.inputWrap}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Message OpenClaw..."
+              placeholderTextColor="#71717A"
+              style={styles.textInput}
+              multiline
+            />
+            {isStreaming ? (
+              <Pressable style={styles.abortButton} onPress={() => void abortMessage()}>
+                <Text style={styles.abortButtonText}>Stop</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={[
+                  styles.sendButton,
+                  draft.trim().length === 0 || isSending ? styles.sendButtonDisabled : null,
+                ]}
+                onPress={() => void sendMessage()}
+                disabled={draft.trim().length === 0 || isSending}
+              >
+                <Text style={styles.sendButtonText}>{isSending ? "..." : "↑"}</Text>
+              </Pressable>
+            )}
+          </View>
+          <Text style={styles.disclaimer}>OpenClaw can make mistakes. Verify important info.</Text>
         </View>
-        <Text style={styles.disclaimer}>OpenClaw can make mistakes. Verify important info.</Text>
-      </View>
+      </KeyboardAvoidingView>
       <StatusBar style="dark" />
     </SafeAreaView>
   );
@@ -653,7 +743,7 @@ const styles = StyleSheet.create({
   messagesContent: {
     paddingHorizontal: 16,
     paddingTop: 18,
-    paddingBottom: 140,
+    paddingBottom: 20,
     gap: 22,
   },
   emptyStateWrap: {
@@ -759,10 +849,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   footer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
     borderTopWidth: 1,
     borderTopColor: "#E2E8F0",
     backgroundColor: "rgba(255, 255, 255, 0.96)",
