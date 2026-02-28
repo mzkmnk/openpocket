@@ -1,12 +1,12 @@
 import type { SecureStoreAdapter } from "../security/secureStore";
 import type {
-    GatewaySessionRow,
-    SessionListItem,
-    SessionListQuery,
-    SessionsListParams,
-    SessionsListResult,
-    SessionsPatchParams,
-    SessionsPatchResult,
+  GatewaySessionRow,
+  SessionListItem,
+  SessionListQuery,
+  SessionsListParams,
+  SessionsListResult,
+  SessionsPatchParams,
+  SessionsPatchResult,
 } from "./types";
 
 const SESSION_PINS_KEY = "openpocket.sessions.pins.v1";
@@ -145,8 +145,7 @@ export class SessionsService {
    *          Gateway からの patch 結果。
    */
   async updateSessionLabel(key: string, label: string | null): Promise<SessionsPatchResult> {
-    const normalizedLabel =
-      label === null ? null : label.trim().length === 0 ? null : label.trim();
+    const normalizedLabel = label === null ? null : label.trim().length === 0 ? null : label.trim();
     const params: SessionsPatchParams = { key, label: normalizedLabel };
     return this.requester.request<SessionsPatchResult>("sessions.patch", params);
   }
