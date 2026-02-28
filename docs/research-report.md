@@ -77,7 +77,13 @@
 - Gateway URL 形式（Serve/直bind）と証明書ピンニング方針
 - 「端末ペアリング承認をアプリ内でやるか」or「最初はControl UI/CLIで承認するか」
 
-## 5. 参考
+## 5. MVP Go/No-Go 基準
+
+- `docs/go-no-go-checklist.md` のチェックが埋まれば「開発に進める」判断ができる
+
+## 6. 参考
 
 - `docs/protocol-notes.md`
+- `docs/operator-scopes.md`
+- `docs/expo-crypto-feasibility.md`
 
