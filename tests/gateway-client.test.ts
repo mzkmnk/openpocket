@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { GatewayWebSocketLike } from "../src/core/gateway";
-import { GatewayClient } from "../src/core/gateway";
+import { GatewayClient } from "../src/core/gateway/GatewayClient";
+import type { GatewayWebSocketLike } from "../src/core/gateway/types";
 
 class MockWebSocket implements GatewayWebSocketLike {
   readyState = 0;
