@@ -130,35 +130,38 @@ export function SessionsScreen() {
   const clientRef = useRef<GatewayClient | null>(null);
   const serviceRef = useRef<SessionsService | null>(null);
 
-  const refreshSessions = useCallback(async (useRefreshingState: boolean) => {
-    const service = serviceRef.current;
-    if (!service) {
-      throw new Error("Session service is not ready");
-    }
-
-    if (useRefreshingState) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-    setErrorMessage("");
-
-    try {
-      const result = await service.listSessions();
-      setAllSessions(result);
-      if (result.length > 0 && !activeSessionKey) {
-        setActiveSessionKey(result[0]?.key ?? "");
+  const refreshSessions = useCallback(
+    async (useRefreshingState: boolean) => {
+      const service = serviceRef.current;
+      if (!service) {
+        throw new Error("Session service is not ready");
       }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to load sessions");
-    } finally {
+
       if (useRefreshingState) {
-        setIsRefreshing(false);
+        setIsRefreshing(true);
       } else {
-        setIsLoading(false);
+        setIsLoading(true);
       }
-    }
-  }, [activeSessionKey]);
+      setErrorMessage("");
+
+      try {
+        const result = await service.listSessions();
+        setAllSessions(result);
+        if (result.length > 0 && !activeSessionKey) {
+          setActiveSessionKey(result[0]?.key ?? "");
+        }
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Failed to load sessions");
+      } finally {
+        if (useRefreshingState) {
+          setIsRefreshing(false);
+        } else {
+          setIsLoading(false);
+        }
+      }
+    },
+    [activeSessionKey],
+  );
 
   const initialize = useCallback(async () => {
     setIsLoading(true);
@@ -232,14 +235,10 @@ export function SessionsScreen() {
           });
 
     if (tab === "pinned") {
-      return searched
-        .filter((item) => item.pinned)
-        .sort((a, b) => b.updatedAt - a.updatedAt);
+      return searched.filter((item) => item.pinned).sort((a, b) => b.updatedAt - a.updatedAt);
     }
     if (tab === "recent") {
-      return searched
-        .slice()
-        .sort((a, b) => b.updatedAt - a.updatedAt);
+      return searched.slice().sort((a, b) => b.updatedAt - a.updatedAt);
     }
     return searched;
   }, [allSessions, searchText, tab]);
@@ -414,7 +413,12 @@ export function SessionsScreen() {
         />
       )}
 
-      <Modal visible={Boolean(editingSession)} transparent animationType="fade" onRequestClose={() => setEditingSession(null)}>
+      <Modal
+        visible={Boolean(editingSession)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditingSession(null)}
+      >
         <View style={styles.modalRoot}>
           <Pressable style={styles.modalBackdrop} onPress={() => setEditingSession(null)} />
           <View style={styles.modalSheet}>
@@ -441,7 +445,9 @@ export function SessionsScreen() {
                 onPress={() => void onSaveLabel()}
                 disabled={isSavingLabel}
               >
-                <Text style={styles.modalSaveText}>{isSavingLabel ? "Saving..." : "Save Changes"}</Text>
+                <Text style={styles.modalSaveText}>
+                  {isSavingLabel ? "Saving..." : "Save Changes"}
+                </Text>
               </Pressable>
             </View>
           </View>
