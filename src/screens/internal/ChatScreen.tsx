@@ -13,8 +13,6 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   Platform,
   Pressable,
   SafeAreaView,
@@ -41,7 +39,6 @@ import type { RootStackParamList } from "../../router/types";
 
 type ChatNavigationProp = NativeStackNavigationProp<RootStackParamList, "internal/chat">;
 type ChatRouteProp = RouteProp<RootStackParamList, "internal/chat">;
-const SCROLL_TO_BOTTOM_THRESHOLD_PX = 220;
 
 type UiMessage = {
   id: string;
@@ -169,11 +166,6 @@ export function ChatScreen() {
   const activeRunIdRef = useRef<string | null>(null);
   const streamTextRef = useRef("");
   const messagesScrollRef = useRef<ScrollView | null>(null);
-  const scrollMetricsRef = useRef({
-    contentHeight: 0,
-    viewportHeight: 0,
-    offsetY: 0,
-  });
 
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -184,32 +176,12 @@ export function ChatScreen() {
   const [errorMessage, setErrorMessage] = useState("");
   const [connectionDetail, setConnectionDetail] = useState("Connecting to gateway...");
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-
-  const updateScrollToBottomVisibility = useCallback(() => {
-    const { contentHeight, viewportHeight, offsetY } = scrollMetricsRef.current;
-    const distanceFromBottom = contentHeight - (offsetY + viewportHeight);
-    setShowScrollToBottom(distanceFromBottom > SCROLL_TO_BOTTOM_THRESHOLD_PX);
-  }, []);
 
   const scrollToBottom = useCallback((animated: boolean) => {
     requestAnimationFrame(() => {
       messagesScrollRef.current?.scrollToEnd({ animated });
     });
   }, []);
-
-  const handleMessagesScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-      scrollMetricsRef.current = {
-        contentHeight: contentSize.height,
-        viewportHeight: layoutMeasurement.height,
-        offsetY: contentOffset.y,
-      };
-      updateScrollToBottomVisibility();
-    },
-    [updateScrollToBottomVisibility],
-  );
 
   const setStreamingText = useCallback((next: string) => {
     streamTextRef.current = next;
@@ -457,20 +429,14 @@ export function ChatScreen() {
           ref={messagesScrollRef}
           contentContainerStyle={styles.messagesContent}
           style={styles.messagesArea}
-          onContentSizeChange={(_width, height) => {
-            scrollMetricsRef.current.contentHeight = height;
-            if (!showScrollToBottom) {
-              scrollToBottom(false);
-            }
-            updateScrollToBottomVisibility();
-          }}
-          onScroll={handleMessagesScroll}
-          scrollEventThrottle={16}
+          onContentSizeChange={() => scrollToBottom(false)}
         >
           {messages.length === 0 ? (
             <View style={styles.emptyStateWrap}>
               <Text style={styles.emptyStateTitle}>No messages yet</Text>
-              <Text style={styles.emptyStateBody}>Send your first message to start this session.</Text>
+              <Text style={styles.emptyStateBody}>
+                Send your first message to start this session.
+              </Text>
             </View>
           ) : null}
 
@@ -479,7 +445,10 @@ export function ChatScreen() {
             return (
               <View
                 key={message.id}
-                style={[styles.messageRow, isAssistant ? styles.messageRowLeft : styles.messageRowRight]}
+                style={[
+                  styles.messageRow,
+                  isAssistant ? styles.messageRowLeft : styles.messageRowRight,
+                ]}
               >
                 {isAssistant ? (
                   <View style={[styles.avatar, styles.avatarAssistant]}>
@@ -497,7 +466,12 @@ export function ChatScreen() {
                     <Text style={styles.metaTime}>{message.time}</Text>
                     {!isAssistant ? <Text style={styles.metaAuthor}>You</Text> : null}
                   </View>
-                  <View style={[styles.bubble, isAssistant ? styles.assistantBubble : styles.userBubble]}>
+                  <View
+                    style={[
+                      styles.bubble,
+                      isAssistant ? styles.assistantBubble : styles.userBubble,
+                    ]}
+                  >
                     <Text
                       style={[
                         styles.bubbleText,
@@ -536,12 +510,6 @@ export function ChatScreen() {
         </ScrollView>
       )}
 
-      {showScrollToBottom ? (
-        <Pressable style={styles.scrollToBottomButton} onPress={() => scrollToBottom(true)}>
-          <Text style={styles.scrollToBottomButtonText}>↓</Text>
-        </Pressable>
-      ) : null}
-
       <View style={styles.footer}>
         <ScrollView
           horizontal
@@ -549,7 +517,11 @@ export function ChatScreen() {
           contentContainerStyle={styles.quickActionsWrap}
         >
           {quickActions.map((action) => (
-            <Pressable key={action.id} style={styles.quickAction} onPress={() => setDraft(action.label)}>
+            <Pressable
+              key={action.id}
+              style={styles.quickAction}
+              onPress={() => setDraft(action.label)}
+            >
               <Text style={styles.quickActionText}>{action.label}</Text>
             </Pressable>
           ))}
@@ -570,7 +542,10 @@ export function ChatScreen() {
             </Pressable>
           ) : (
             <Pressable
-              style={[styles.sendButton, draft.trim().length === 0 || isSending ? styles.sendButtonDisabled : null]}
+              style={[
+                styles.sendButton,
+                draft.trim().length === 0 || isSending ? styles.sendButtonDisabled : null,
+              ]}
               onPress={() => void sendMessage()}
               disabled={draft.trim().length === 0 || isSending}
             >
@@ -873,28 +848,5 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
     fontFamily: "SpaceGrotesk_400Regular",
     fontSize: 10,
-  },
-  scrollToBottomButton: {
-    position: "absolute",
-    right: 16,
-    bottom: 126,
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "#2563EB",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 5,
-    zIndex: 20,
-  },
-  scrollToBottomButtonText: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    lineHeight: 20,
-    fontFamily: "SpaceGrotesk_700Bold",
   },
 });
