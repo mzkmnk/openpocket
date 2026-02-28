@@ -15,6 +15,7 @@ import {
 } from "react-native";
 
 import { copyText } from "./src/poc/clipboard";
+import { base64UrlToBytes } from "./src/poc/base64";
 import { getOrCreateIdentity, makeSignature, persistDeviceToken } from "./src/poc/identity";
 import { parseMarkdownBlocks } from "./src/poc/markdown";
 import type { ChatMessage, ConnectionStatus, DeviceIdentity, WsEvent, WsReq, WsRes } from "./src/poc/types";
@@ -327,6 +328,19 @@ export default function App() {
                 scopes,
                 token: tokenForAuth,
               });
+
+              // Self-check: verify signature locally before sending to gateway.
+              try {
+                const msg = new TextEncoder().encode(signed.payload);
+                const sigBytes = base64UrlToBytes(signed.signature);
+                const pubBytes = base64UrlToBytes(identityData.publicKey);
+                const ok = await (await import("@noble/ed25519")).verifyAsync(sigBytes, msg, pubBytes);
+                const maskedPayload = signed.payload.replace(tokenForAuth, `<token:${tokenForAuth.length}>`);
+                appendLog(`device-auth self-check verify=${ok} pubLen=${pubBytes.length} sigLen=${sigBytes.length}`);
+                appendLog(`device-auth payload(v2 masked): ${maskedPayload}`);
+              } catch (e) {
+                appendLog(`device-auth self-check error: ${String(e)}`);
+              }
               const connectParams = {
                 minProtocol: 3,
                 maxProtocol: 3,

@@ -125,7 +125,7 @@ export async function persistDeviceToken(identity: DeviceIdentity, deviceToken: 
   return next;
 }
 
-function signaturePayloadV2(args: {
+export function signaturePayloadV2(args: {
   deviceId: string;
   clientId: string;
   clientMode: string;
@@ -159,7 +159,7 @@ export async function makeSignature(
     scopes: string[];
     token?: string;
   },
-): Promise<{ signature: string; signedAt: number }> {
+): Promise<{ signature: string; signedAt: number; payload: string }> {
   const signedAt = Date.now();
   const payload = signaturePayloadV2({
     deviceId: identity.deviceId,
@@ -179,5 +179,6 @@ export async function makeSignature(
   return {
     signature: bytesToBase64Url(sig),
     signedAt,
+    payload,
   };
 }
