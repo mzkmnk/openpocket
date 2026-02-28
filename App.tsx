@@ -1,5 +1,6 @@
 import { useFonts, SpaceGrotesk_700Bold } from "@expo-google-fonts/space-grotesk";
 import { StatusBar } from "expo-status-bar";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -12,440 +13,37 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { copyText } from "./src/poc/clipboard";
+import { getOrCreateIdentity, makeSignature, persistDeviceToken } from "./src/poc/identity";
+import { parseMarkdownBlocks } from "./src/poc/markdown";
+import type { ChatMessage, ConnectionStatus, DeviceIdentity, WsEvent, WsReq, WsRes } from "./src/poc/types";
+import { asRecord, extractHistoryMessages, extractMessageText, extractSessionItems, makeId } from "./src/poc/utils";
 
 import "./global.css";
 
-type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
+const RECONNECT_MS = 2000;
+const MAX_LOGS = 80;
 
-type WsReq = {
-  type: "req";
-  id: string;
-  method: string;
-  params?: unknown;
+type Pending = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
 };
-
-type WsRes = {
-  type: "res";
-  id: string;
-  ok: boolean;
-  payload?: unknown;
-  error?: { code?: string; message?: string } | string;
-};
-
-type WsEvent = {
-  type: "event";
-  event: string;
-  payload?: unknown;
-};
-
-type SessionItem = {
-  key: string;
-  label?: string;
-  updatedAt?: string | number;
-};
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant" | "system" | "tool";
-  text: string;
-  runId?: string;
-  pending?: boolean;
-};
-
-type DeviceIdentity = {
-  deviceId: string;
-  publicKey: string;
-  privateKey: string;
-  deviceToken?: string;
-};
-
-type MarkdownBlock =
-  | {
-      kind: "text";
-      text: string;
-    }
-  | {
-      kind: "code";
-      language?: string;
-      code: string;
-    };
-
-const STORAGE_KEY = "openpocket.poc.device.identity";
-const INITIAL_STATUS: ConnectionStatus = "disconnected";
-const B64_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-type AppGlobals = typeof globalThis & {
-  crypto?: {
-    randomUUID?: () => string;
-    getRandomValues?: (arr: Uint8Array) => Uint8Array;
-    subtle?: {
-      importKey: (...args: unknown[]) => Promise<unknown>;
-      sign: (...args: unknown[]) => Promise<ArrayBuffer>;
-      generateKey: (...args: unknown[]) => Promise<{
-        publicKey: unknown;
-        privateKey: unknown;
-      }>;
-      exportKey: (...args: unknown[]) => Promise<unknown>;
-    };
-  };
-  btoa?: (data: string) => string;
-  atob?: (data: string) => string;
-  localStorage?: {
-    setItem: (key: string, value: string) => void;
-    getItem: (key: string) => string | null;
-  };
-  navigator?: {
-    clipboard?: {
-      writeText: (value: string) => Promise<void>;
-    };
-  };
-};
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  if (!v || typeof v !== "object") {
-    return null;
-  }
-  return v as Record<string, unknown>;
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function makeId(prefix: string): string {
-  const appGlobals = globalThis as AppGlobals;
-  if (typeof appGlobals.crypto?.randomUUID === "function") {
-    return `${prefix}_${appGlobals.crypto.randomUUID()}`;
-  }
-  return `${prefix}_${Math.random().toString(36).slice(2, 11)}_${Date.now()}`;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  const appGlobals = globalThis as AppGlobals;
-  if (typeof appGlobals.btoa === "function") {
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 1) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return appGlobals.btoa(binary);
-  }
-
-  let out = "";
-  for (let i = 0; i < bytes.length; i += 3) {
-    const a = bytes[i];
-    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
-
-    const triple = (a << 16) | (b << 8) | c;
-    out += B64_TABLE[(triple >> 18) & 63];
-    out += B64_TABLE[(triple >> 12) & 63];
-    out += i + 1 < bytes.length ? B64_TABLE[(triple >> 6) & 63] : "=";
-    out += i + 2 < bytes.length ? B64_TABLE[triple & 63] : "=";
-  }
-
-  return out;
-}
-
-function utf8ToBase64(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  return bytesToBase64(bytes);
-}
-
-function randomB64(size: number): string {
-  const appGlobals = globalThis as AppGlobals;
-  const bytes = new Uint8Array(size);
-  if (typeof appGlobals.crypto?.getRandomValues === "function") {
-    appGlobals.crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i += 1) {
-      bytes[i] = Math.floor(Math.random() * 255);
-    }
-  }
-  return bytesToBase64(bytes);
-}
-
-function parseMarkdownBlocks(value: string): MarkdownBlock[] {
-  const lines = value.split("\n");
-  const blocks: MarkdownBlock[] = [];
-  let textBuf: string[] = [];
-  let codeBuf: string[] | null = null;
-  let language = "";
-
-  const flushText = () => {
-    if (textBuf.length > 0) {
-      blocks.push({ kind: "text", text: textBuf.join("\n") });
-      textBuf = [];
-    }
-  };
-
-  const flushCode = () => {
-    if (codeBuf !== null) {
-      blocks.push({
-        kind: "code",
-        language: language || undefined,
-        code: codeBuf.join("\n"),
-      });
-      codeBuf = null;
-      language = "";
-    }
-  };
-
-  for (const line of lines) {
-    if (line.startsWith("```")) {
-      if (codeBuf === null) {
-        flushText();
-        codeBuf = [];
-        language = line.slice(3).trim();
-      } else {
-        flushCode();
-      }
-      continue;
-    }
-
-    if (codeBuf !== null) {
-      codeBuf.push(line);
-    } else {
-      textBuf.push(line);
-    }
-  }
-
-  flushText();
-  flushCode();
-
-  if (blocks.length === 0) {
-    return [{ kind: "text", text: value }];
-  }
-
-  return blocks;
-}
-
-function extractMessageText(input: unknown): string {
-  if (typeof input === "string") {
-    return input;
-  }
-
-  if (!input) {
-    return "";
-  }
-
-  if (Array.isArray(input)) {
-    return input.map(extractMessageText).filter(Boolean).join("\n");
-  }
-
-  const rec = asRecord(input);
-  if (!rec) {
-    return "";
-  }
-
-  const candidates = [
-    rec.text,
-    rec.delta,
-    rec.content,
-    rec.message,
-    rec.output,
-    rec.value,
-    rec.parts,
-    rec.blocks,
-    rec.data,
-  ];
-
-  const texts = candidates.map(extractMessageText).filter(Boolean);
-  return texts.join("\n");
-}
-
-function extractSessionItems(payload: unknown): SessionItem[] {
-  const root = asRecord(payload);
-  const list = Array.isArray(root?.sessions)
-    ? root?.sessions
-    : Array.isArray(root?.items)
-      ? root?.items
-      : Array.isArray(payload)
-        ? payload
-        : [];
-
-  return list
-    .map((raw) => {
-      const item = asRecord(raw);
-      if (!item || typeof item.key !== "string") {
-        return null;
-      }
-      return {
-        key: item.key,
-        label: typeof item.label === "string" ? item.label : undefined,
-        updatedAt:
-          typeof item.updatedAt === "string" || typeof item.updatedAt === "number"
-            ? item.updatedAt
-            : undefined,
-      } satisfies SessionItem;
-    })
-    .filter((item): item is SessionItem => item !== null);
-}
-
-function extractHistoryMessages(payload: unknown): ChatMessage[] {
-  const root = asRecord(payload);
-  const list = Array.isArray(root?.messages)
-    ? root?.messages
-    : Array.isArray(payload)
-      ? payload
-      : [];
-
-  return list
-    .map((raw, idx) => {
-      const item = asRecord(raw);
-      if (!item) {
-        return null;
-      }
-
-      const role =
-        item.role === "assistant" || item.role === "system" || item.role === "tool"
-          ? item.role
-          : "user";
-
-      const messageText = extractMessageText(item);
-      if (!messageText) {
-        return null;
-      }
-
-      return {
-        id: typeof item.id === "string" ? item.id : `hist_${idx}_${Date.now()}`,
-        role,
-        text: messageText,
-        runId: typeof item.runId === "string" ? item.runId : undefined,
-      } satisfies ChatMessage;
-    })
-    .filter((item): item is ChatMessage => item !== null);
-}
-
-function saveIdentity(identity: DeviceIdentity) {
-  const appGlobals = globalThis as AppGlobals;
-  if (!appGlobals.localStorage) {
-    return;
-  }
-  appGlobals.localStorage.setItem(STORAGE_KEY, JSON.stringify(identity));
-}
-
-function loadIdentity(): DeviceIdentity | null {
-  const appGlobals = globalThis as AppGlobals;
-  if (!appGlobals.localStorage) {
-    return null;
-  }
-
-  const raw = appGlobals.localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    const rec = asRecord(parsed);
-    if (!rec) {
-      return null;
-    }
-
-    if (
-      typeof rec.deviceId !== "string" ||
-      typeof rec.publicKey !== "string" ||
-      typeof rec.privateKey !== "string"
-    ) {
-      return null;
-    }
-
-    return {
-      deviceId: rec.deviceId,
-      publicKey: rec.publicKey,
-      privateKey: rec.privateKey,
-      deviceToken: typeof rec.deviceToken === "string" ? rec.deviceToken : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function makeSignature(identity: DeviceIdentity, nonce: string): Promise<string> {
-  const appGlobals = globalThis as AppGlobals;
-  const payload = `${identity.deviceId}:${nonce}:${nowIso()}`;
-
-  if (
-    appGlobals.crypto?.subtle &&
-    typeof TextEncoder !== "undefined" &&
-    identity.privateKey.startsWith("jwk:")
-  ) {
-    try {
-      const jwk = JSON.parse(identity.privateKey.slice(4));
-      const key = await appGlobals.crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, false, [
-        "sign",
-      ]);
-      const binary = await appGlobals.crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(payload));
-      return bytesToBase64(new Uint8Array(binary));
-    } catch {
-      // fall through to PoC fallback
-    }
-  }
-
-  return utf8ToBase64(payload);
-}
-
-async function getOrCreateIdentity(): Promise<DeviceIdentity> {
-  const appGlobals = globalThis as AppGlobals;
-  const existing = loadIdentity();
-  if (existing) {
-    return existing;
-  }
-
-  if (appGlobals.crypto?.subtle) {
-    try {
-      const pair = await appGlobals.crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
-      const publicJwk = await appGlobals.crypto.subtle.exportKey("jwk", pair.publicKey);
-      const privateJwk = await appGlobals.crypto.subtle.exportKey("jwk", pair.privateKey);
-
-      const identity: DeviceIdentity = {
-        deviceId: makeId("device"),
-        publicKey: `jwk:${JSON.stringify(publicJwk)}`,
-        privateKey: `jwk:${JSON.stringify(privateJwk)}`,
-      };
-
-      saveIdentity(identity);
-      return identity;
-    } catch {
-      // continue with random fallback
-    }
-  }
-
-  const identity: DeviceIdentity = {
-    deviceId: makeId("device"),
-    publicKey: `raw:${randomB64(32)}`,
-    privateKey: `raw:${randomB64(64)}`,
-  };
-
-  saveIdentity(identity);
-  return identity;
-}
-
-async function copyText(content: string): Promise<boolean> {
-  const appGlobals = globalThis as AppGlobals;
-  try {
-    if (appGlobals.navigator?.clipboard?.writeText) {
-      await appGlobals.navigator.clipboard.writeText(content);
-      return true;
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
-}
 
 function MarkdownMessage({ text }: { text: string }) {
   const blocks = useMemo(() => parseMarkdownBlocks(text), [text]);
-  const [copied, setCopied] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
-  const onCopy = useCallback(async (value: string) => {
+  const onCopy = useCallback(async (value: string, index: number) => {
     const ok = await copyText(value);
-    setCopied(ok);
-    if (ok) {
-      setTimeout(() => setCopied(false), 1000);
+    if (!ok) {
+      return;
     }
+
+    setCopiedIndex(index);
+    setTimeout(() => {
+      setCopiedIndex((prev) => (prev === index ? null : prev));
+    }, 1200);
   }, []);
 
   return (
@@ -463,8 +61,8 @@ function MarkdownMessage({ text }: { text: string }) {
           <View key={`c_${idx}`} style={styles.codeBlock}>
             <View style={styles.codeHeader}>
               <Text style={styles.codeLang}>{block.language ?? "code"}</Text>
-              <Pressable style={styles.copyButton} onPress={() => void onCopy(block.code)}>
-                <Text style={styles.copyButtonText}>{copied ? "Copied" : "Copy"}</Text>
+              <Pressable style={styles.copyButton} onPress={() => void onCopy(block.code, idx)}>
+                <Text style={styles.copyButtonText}>{copiedIndex === idx ? "Copied" : "Copy"}</Text>
               </Pressable>
             </View>
             <ScrollView horizontal>
@@ -486,64 +84,76 @@ export default function App() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reqIdRef = useRef(0);
-  const pendingRef = useRef(new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>());
-  const streamByRunRef = useRef(new Map<string, string>());
+  const pendingRef = useRef<Map<string, Pending>>(new Map());
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shouldReconnectRef = useRef(false);
+  const lastConnectArgsRef = useRef<{ gatewayUrl: string; token: string; password: string } | null>(null);
+  const streamByRunRef = useRef<Map<string, string>>(new Map());
+
+  const [status, setStatus] = useState<ConnectionStatus>("disconnected");
+  const [statusMessage, setStatusMessage] = useState("Not connected");
+  const [logs, setLogs] = useState<string[]>([]);
 
   const [gatewayUrl, setGatewayUrl] = useState("");
   const [token, setToken] = useState("");
   const [password, setPassword] = useState("");
-  const [status, setStatus] = useState<ConnectionStatus>(INITIAL_STATUS);
-  const [statusMessage, setStatusMessage] = useState("Not connected");
-  const [logs, setLogs] = useState<string[]>([]);
 
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
-  const [sessions, setSessions] = useState<SessionItem[]>([]);
-  const [selectedSessionKey, setSelectedSessionKey] = useState<string>("");
+  const [sessions, setSessions] = useState<{ key: string; label?: string; updatedAt?: string | number }[]>([]);
+  const [selectedSessionKey, setSelectedSessionKey] = useState("");
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
   const [streamingText, setStreamingText] = useState("");
   const [activeRunId, setActiveRunId] = useState("");
+  const [chatInput, setChatInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [lastIdempotencyKey, setLastIdempotencyKey] = useState("");
 
   const appendLog = useCallback((line: string) => {
-    setLogs((prev) => [`${new Date().toLocaleTimeString()} ${line}`, ...prev].slice(0, 50));
+    setLogs((prev) => [`${new Date().toLocaleTimeString()} ${line}`, ...prev].slice(0, MAX_LOGS));
   }, []);
 
-  const closeSocket = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.onopen = null;
-      wsRef.current.onmessage = null;
-      wsRef.current.onerror = null;
-      wsRef.current.onclose = null;
-      wsRef.current.close();
-      wsRef.current = null;
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
   }, []);
 
-  const call = useCallback(
-    (method: string, params?: unknown) => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        return Promise.reject(new Error("Socket is not connected"));
-      }
+  const rejectAllPending = useCallback((message: string) => {
+    for (const entry of pendingRef.current.values()) {
+      entry.reject(new Error(message));
+    }
+    pendingRef.current.clear();
+  }, []);
 
-      reqIdRef.current += 1;
-      const id = `${Date.now()}_${reqIdRef.current}`;
-      const req: WsReq = {
-        type: "req",
-        id,
-        method,
-        params,
-      };
+  const closeSocket = useCallback(() => {
+    if (!wsRef.current) {
+      return;
+    }
 
-      return new Promise<unknown>((resolve, reject) => {
-        pendingRef.current.set(id, { resolve, reject });
-        wsRef.current?.send(JSON.stringify(req));
-      });
-    },
-    [],
-  );
+    wsRef.current.onopen = null;
+    wsRef.current.onmessage = null;
+    wsRef.current.onerror = null;
+    wsRef.current.onclose = null;
+    wsRef.current.close();
+    wsRef.current = null;
+  }, []);
+
+  const call = useCallback((method: string, params?: unknown): Promise<unknown> => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Socket is not connected"));
+    }
+
+    reqIdRef.current += 1;
+    const id = `${Date.now()}_${reqIdRef.current}`;
+    const req: WsReq = { type: "req", id, method, params };
+
+    return new Promise<unknown>((resolve, reject) => {
+      pendingRef.current.set(id, { resolve, reject });
+      wsRef.current?.send(JSON.stringify(req));
+    });
+  }, []);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -554,7 +164,8 @@ export default function App() {
       });
       const items = extractSessionItems(payload);
       setSessions(items);
-      appendLog(`sessions.list -> ${items.length} sessions`);
+      appendLog(`sessions.list -> ${items.length}`);
+
       if (!selectedSessionKey && items.length > 0) {
         setSelectedSessionKey(items[0].key);
       }
@@ -571,14 +182,12 @@ export default function App() {
       }
 
       try {
-        const payload = await call("chat.history", {
-          sessionKey,
-          limit: 80,
-        });
+        const payload = await call("chat.history", { sessionKey, limit: 120 });
         const history = extractHistoryMessages(payload);
         setMessages(history);
         setStreamingText("");
-        appendLog(`chat.history(${sessionKey}) -> ${history.length} messages`);
+        setActiveRunId("");
+        appendLog(`chat.history(${sessionKey}) -> ${history.length}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         appendLog(`chat.history failed: ${message}`);
@@ -587,241 +196,285 @@ export default function App() {
     [appendLog, call],
   );
 
-  const performConnect = useCallback(async () => {
-    if (!gatewayUrl.trim()) {
-      setStatus("error");
-      setStatusMessage("Gateway URL is required");
-      return;
-    }
-
-    closeSocket();
-    setStatus("connecting");
-    setStatusMessage("Connecting...");
-    setMessages([]);
-    setStreamingText("");
-    setSessions([]);
-
-    const socket = new WebSocket(gatewayUrl.trim());
-    wsRef.current = socket;
-
-    socket.onopen = () => {
-      appendLog("WS opened");
-      setStatusMessage("WS open; waiting for connect.challenge");
-    };
-
-    socket.onerror = () => {
-      setStatus("error");
-      setStatusMessage("WebSocket error");
-      appendLog("WebSocket error");
-    };
-
-    socket.onclose = () => {
-      setStatus((prev) => (prev === "connected" ? "reconnecting" : prev));
-      setStatusMessage("Socket closed");
-      appendLog("WS closed");
-      for (const entry of pendingRef.current.values()) {
-        entry.reject(new Error("socket closed"));
-      }
-      pendingRef.current.clear();
-    };
-
-    socket.onmessage = (ev) => {
-      let packet: WsRes | WsEvent;
-      try {
-        packet = JSON.parse(String(ev.data));
-      } catch {
-        appendLog(`Invalid message: ${String(ev.data).slice(0, 120)}`);
+  const connectWithParams = useCallback(
+    async (params: { gatewayUrl: string; token: string; password: string }) => {
+      const url = params.gatewayUrl.trim();
+      const nextToken = params.token.trim();
+      const nextPassword = params.password.trim();
+      if (!url) {
+        setStatus("error");
+        setStatusMessage("Gateway URL is required");
         return;
       }
 
-      if (packet.type === "res") {
-        const pending = pendingRef.current.get(packet.id);
-        if (!pending) {
+      clearReconnectTimer();
+      closeSocket();
+
+      setStatus((prev) => (prev === "connected" ? "reconnecting" : "connecting"));
+      setStatusMessage("Opening websocket...");
+      shouldReconnectRef.current = true;
+      lastConnectArgsRef.current = { gatewayUrl: url, token: nextToken, password: nextPassword };
+
+      const socket = new WebSocket(url);
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        appendLog("WS opened");
+        setStatusMessage("WS open, waiting connect.challenge");
+      };
+
+      socket.onerror = () => {
+        setStatus("error");
+        setStatusMessage("WebSocket error");
+        appendLog("WS error");
+      };
+
+      socket.onclose = () => {
+        wsRef.current = null;
+        rejectAllPending("socket closed");
+
+        if (!shouldReconnectRef.current) {
+          setStatus("disconnected");
+          setStatusMessage("Socket closed");
+          appendLog("WS closed");
           return;
         }
-        pendingRef.current.delete(packet.id);
 
-        if (packet.ok) {
-          pending.resolve(packet.payload);
-        } else {
+        setStatus("reconnecting");
+        setStatusMessage(`Socket closed. reconnect in ${Math.floor(RECONNECT_MS / 1000)}s`);
+        appendLog("WS closed, scheduling reconnect");
+
+        clearReconnectTimer();
+        reconnectTimerRef.current = setTimeout(() => {
+          const args = lastConnectArgsRef.current;
+          if (!args || !shouldReconnectRef.current) {
+            return;
+          }
+          void connectWithParams(args);
+        }, RECONNECT_MS);
+      };
+
+      socket.onmessage = (ev) => {
+        let packet: WsRes | WsEvent;
+        try {
+          packet = JSON.parse(String(ev.data)) as WsRes | WsEvent;
+        } catch {
+          appendLog(`invalid packet: ${String(ev.data).slice(0, 120)}`);
+          return;
+        }
+
+        if (packet.type === "res") {
+          const pending = pendingRef.current.get(packet.id);
+          if (!pending) {
+            return;
+          }
+
+          pendingRef.current.delete(packet.id);
+          if (packet.ok) {
+            pending.resolve(packet.payload);
+            return;
+          }
+
           const code = typeof packet.error === "object" ? packet.error?.code : undefined;
           const message =
             typeof packet.error === "object"
               ? packet.error?.message ?? "request failed"
               : packet.error ?? "request failed";
-          const detail = code ? `${code}: ${message}` : message;
+
+          const detail = code ? `${code}: ${message}` : String(message);
           pending.reject(new Error(detail));
           if (code === "PAIRING_REQUIRED") {
             setStatus("error");
             setStatusMessage(`PAIRING_REQUIRED: ${message}`);
           }
+          return;
         }
-        return;
-      }
 
-      if (packet.type !== "event") {
-        return;
-      }
+        if (packet.type !== "event") {
+          return;
+        }
 
-      if (packet.event === "connect.challenge") {
-        void (async () => {
-          try {
-            const eventPayload = asRecord(packet.payload);
-            const nonce = typeof eventPayload?.nonce === "string" ? eventPayload.nonce : "";
-            const signedAt = nowIso();
-            const ident = await getOrCreateIdentity();
-            setIdentity(ident);
+        if (packet.event === "connect.challenge") {
+          void (async () => {
+            try {
+              const payload = asRecord(packet.payload);
+              const nonce = typeof payload?.nonce === "string" ? payload.nonce : "";
+              const identityData = await getOrCreateIdentity();
+              setIdentity(identityData);
 
-            const signature = await makeSignature(ident, nonce);
+              const signed = await makeSignature(identityData, nonce);
+              const hello = await call("connect", {
+                minProtocol: 3,
+                maxProtocol: 3,
+                role: "operator",
+                scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
+                client: {
+                  id: "openpocket-poc",
+                  version: "0.1.0",
+                  platform: Platform.OS,
+                  mode: "mobile",
+                  instanceId: makeId("instance"),
+                },
+                auth: {
+                  token: nextToken || undefined,
+                  password: nextPassword || undefined,
+                  deviceToken: identityData.deviceToken,
+                },
+                device: {
+                  id: identityData.deviceId,
+                  publicKey: identityData.publicKey,
+                  nonce,
+                  signedAt: signed.signedAt,
+                  signature: signed.signature,
+                },
+              });
 
-            const hello = await call("connect", {
-              minProtocol: 3,
-              maxProtocol: 3,
-              role: "operator",
-              scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
-              client: {
-                id: "openpocket-poc",
-                version: "0.1.0",
-                platform: Platform.OS,
-                mode: "mobile",
-                instanceId: makeId("instance"),
-              },
-              auth: {
-                token: token.trim() || undefined,
-                password: password.trim() || undefined,
-                deviceToken: ident.deviceToken,
-              },
-              device: {
-                id: ident.deviceId,
-                publicKey: ident.publicKey,
-                nonce,
-                signedAt,
-                signature,
-              },
-            });
+              const helloRec = asRecord(hello);
+              const authRec = asRecord(helloRec?.auth);
+              if (typeof authRec?.deviceToken === "string") {
+                const nextIdentity = await persistDeviceToken(identityData, authRec.deviceToken);
+                setIdentity(nextIdentity);
+                appendLog("auth.deviceToken saved");
+              }
 
-            const helloRec = asRecord(hello);
-            const authRec = asRecord(helloRec?.auth);
-            if (typeof authRec?.deviceToken === "string") {
-              const nextIdentity: DeviceIdentity = { ...ident, deviceToken: authRec.deviceToken };
-              setIdentity(nextIdentity);
-              saveIdentity(nextIdentity);
-              appendLog("Saved auth.deviceToken from hello-ok");
+              setStatus("connected");
+              setStatusMessage("connected (hello-ok)");
+              appendLog("connect -> hello-ok");
+              await refreshSessions();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              setStatus("error");
+              setStatusMessage(`connect failed: ${message}`);
+              appendLog(`connect failed: ${message}`);
             }
+          })();
+        }
 
-            setStatus("connected");
-            setStatusMessage("connected (hello-ok)");
-            appendLog("connect -> hello-ok");
-            await refreshSessions();
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setStatus("error");
-            setStatusMessage(`connect failed: ${message}`);
-            appendLog(`connect failed: ${message}`);
+        if (packet.event === "chat") {
+          const payload = asRecord(packet.payload);
+          const sessionKey = typeof payload?.sessionKey === "string" ? payload.sessionKey : "";
+          if (selectedSessionKey && sessionKey && sessionKey !== selectedSessionKey) {
+            return;
           }
-        })();
-      }
 
-      if (packet.event === "chat") {
-        const payload = asRecord(packet.payload);
-        const sessionKey = typeof payload?.sessionKey === "string" ? payload.sessionKey : "";
-        if (selectedSessionKey && sessionKey && sessionKey !== selectedSessionKey) {
-          return;
-        }
+          const state = typeof payload?.state === "string" ? payload.state : "";
+          const runId = typeof payload?.runId === "string" ? payload.runId : "";
+          const text = extractMessageText(payload?.message);
 
-        const state = typeof payload?.state === "string" ? payload.state : "";
-        const runId = typeof payload?.runId === "string" ? payload.runId : "";
-        const text = extractMessageText(payload?.message);
-
-        if (runId) {
-          setActiveRunId(runId);
-        }
-
-        if (state === "delta") {
-          const current = runId ? streamByRunRef.current.get(runId) ?? "" : streamingText;
-          const next = text || extractMessageText(payload?.delta);
-          const merged = `${current}${next}`;
           if (runId) {
-            streamByRunRef.current.set(runId, merged);
+            setActiveRunId(runId);
           }
-          setStreamingText(merged);
-          return;
-        }
 
-        if (state === "final") {
-          const finalText =
-            text ||
-            (runId ? streamByRunRef.current.get(runId) : undefined) ||
-            extractMessageText(payload?.final) ||
-            "";
-          if (finalText) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: makeId("msg"),
-                role: "assistant",
-                text: finalText,
-                runId: runId || undefined,
-              },
-            ]);
+          if (state === "delta") {
+            const current = runId ? streamByRunRef.current.get(runId) ?? "" : streamingText;
+            const deltaText = text || extractMessageText(payload?.delta);
+            const merged = `${current}${deltaText}`;
+            if (runId) {
+              streamByRunRef.current.set(runId, merged);
+            }
+            setStreamingText(merged);
+            return;
           }
-          if (runId) {
-            streamByRunRef.current.delete(runId);
-          }
-          setStreamingText("");
-          setActiveRunId("");
-          setIsSending(false);
-          return;
-        }
 
-        if (state === "aborted") {
-          const abortedText = runId ? streamByRunRef.current.get(runId) : streamingText;
-          if (abortedText) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: makeId("msg"),
-                role: "assistant",
-                text: `${abortedText}\n\n[aborted]`,
-                runId: runId || undefined,
-              },
-            ]);
+          if (state === "final") {
+            const finalText =
+              text ||
+              (runId ? streamByRunRef.current.get(runId) : undefined) ||
+              extractMessageText(payload?.final) ||
+              "";
+            if (finalText) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: makeId("msg"),
+                  role: "assistant",
+                  text: finalText,
+                  runId: runId || undefined,
+                },
+              ]);
+            }
+            if (runId) {
+              streamByRunRef.current.delete(runId);
+            }
+            setStreamingText("");
+            setActiveRunId("");
+            setIsSending(false);
+            return;
           }
-          if (runId) {
-            streamByRunRef.current.delete(runId);
-          }
-          setStreamingText("");
-          setActiveRunId("");
-          setIsSending(false);
-          return;
-        }
 
-        if (state === "error") {
-          const message = typeof payload?.errorMessage === "string" ? payload.errorMessage : "stream error";
-          appendLog(`chat stream error: ${message}`);
-          setStatusMessage(`chat stream error: ${message}`);
-          setStreamingText("");
-          setActiveRunId("");
-          setIsSending(false);
+          if (state === "aborted") {
+            const abortedText = runId ? streamByRunRef.current.get(runId) : streamingText;
+            if (abortedText) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: makeId("msg"),
+                  role: "assistant",
+                  text: `${abortedText}\n\n[aborted]`,
+                  runId: runId || undefined,
+                },
+              ]);
+            }
+            if (runId) {
+              streamByRunRef.current.delete(runId);
+            }
+            setStreamingText("");
+            setActiveRunId("");
+            setIsSending(false);
+            return;
+          }
+
+          if (state === "error") {
+            const message = typeof payload?.errorMessage === "string" ? payload.errorMessage : "stream error";
+            appendLog(`chat stream error: ${message}`);
+            setStatusMessage(`chat stream error: ${message}`);
+            setStreamingText("");
+            setActiveRunId("");
+            setIsSending(false);
+          }
         }
-      }
-    };
-  }, [appendLog, call, closeSocket, gatewayUrl, password, refreshSessions, selectedSessionKey, streamingText, token]);
+      };
+    },
+    [appendLog, call, clearReconnectTimer, closeSocket, refreshSessions, rejectAllPending, selectedSessionKey, streamingText],
+  );
+
+  const performConnect = useCallback(async () => {
+    setMessages([]);
+    setStreamingText("");
+    setSessions([]);
+    setSelectedSessionKey("");
+    setActiveRunId("");
+    await connectWithParams({ gatewayUrl, token, password });
+  }, [connectWithParams, gatewayUrl, password, token]);
+
+  const disconnect = useCallback(() => {
+    shouldReconnectRef.current = false;
+    clearReconnectTimer();
+    closeSocket();
+    rejectAllPending("disconnected");
+    setStatus("disconnected");
+    setStatusMessage("Disconnected by user");
+    appendLog("manual disconnect");
+  }, [appendLog, clearReconnectTimer, closeSocket, rejectAllPending]);
 
   useEffect(() => {
     return () => {
+      shouldReconnectRef.current = false;
+      clearReconnectTimer();
       closeSocket();
+      rejectAllPending("unmount");
     };
-  }, [closeSocket]);
+  }, [clearReconnectTimer, closeSocket, rejectAllPending]);
 
   useEffect(() => {
-    if (selectedSessionKey) {
-      void loadHistory(selectedSessionKey);
+    if (!selectedSessionKey) {
+      return;
     }
+    void loadHistory(selectedSessionKey);
   }, [loadHistory, selectedSessionKey]);
 
   const sendChat = useCallback(async () => {
-    if (!chatInput.trim() || !selectedSessionKey) {
+    if (!selectedSessionKey || !chatInput.trim()) {
       return;
     }
 
@@ -835,7 +488,6 @@ export default function App() {
         id: makeId("msg"),
         role: "user",
         text,
-        pending: false,
       },
     ]);
 
@@ -849,7 +501,7 @@ export default function App() {
         deliver: false,
         idempotencyKey,
       });
-      appendLog(`chat.send ok (idempotencyKey=${idempotencyKey})`);
+      appendLog(`chat.send ok (${idempotencyKey})`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       appendLog(`chat.send failed: ${message}`);
@@ -876,6 +528,10 @@ export default function App() {
     }
   }, [activeRunId, appendLog, call, selectedSessionKey]);
 
+  if (!fontsLoaded) {
+    return null;
+  }
+
   const statusColor =
     status === "connected"
       ? "#16a34a"
@@ -884,10 +540,6 @@ export default function App() {
         : status === "reconnecting"
           ? "#d97706"
           : "#0f172a";
-
-  if (!fontsLoaded) {
-    return null;
-  }
 
   return (
     <SafeAreaView style={styles.root}>
@@ -932,9 +584,14 @@ export default function App() {
             onChangeText={setPassword}
           />
 
-          <Pressable style={styles.primaryButton} onPress={() => void performConnect()}>
-            <Text style={styles.primaryButtonText}>Connect (challenge/hello)</Text>
-          </Pressable>
+          <View style={styles.rowGap8}>
+            <Pressable style={styles.primaryButton} onPress={() => void performConnect()}>
+              <Text style={styles.primaryButtonText}>Connect (challenge/hello)</Text>
+            </Pressable>
+            <Pressable style={styles.disconnectButton} onPress={disconnect}>
+              <Text style={styles.disconnectButtonText}>Disconnect</Text>
+            </Pressable>
+          </View>
 
           {identity ? (
             <Text style={styles.metaText}>
@@ -951,7 +608,6 @@ export default function App() {
               <Text style={styles.secondaryButtonText}>Reload</Text>
             </Pressable>
           </View>
-
           <FlatList
             data={sessions}
             keyExtractor={(item) => item.key}
@@ -1034,7 +690,7 @@ export default function App() {
             ))}
           </View>
           {Platform.OS !== "web" ? (
-            <Text style={styles.metaText}>Code block copy button currently uses web clipboard API only.</Text>
+            <Text style={styles.metaText}>Copy uses expo-clipboard on native.</Text>
           ) : null}
         </View>
       </ScrollView>
@@ -1100,16 +756,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     backgroundColor: "#ffffff",
   },
+  rowGap8: {
+    flexDirection: "row",
+    gap: 8,
+  },
   primaryButton: {
     borderRadius: 10,
     paddingVertical: 10,
+    paddingHorizontal: 12,
     alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "#0f172a",
+    flex: 1,
   },
   primaryButtonText: {
     color: "#f8fafc",
     fontWeight: "700",
     fontSize: 13,
+  },
+  disconnectButton: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#475569",
+  },
+  disconnectButtonText: {
+    color: "#f8fafc",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  rowBetween: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   secondaryButton: {
     borderRadius: 8,
@@ -1122,27 +803,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#334155",
     fontWeight: "700",
-  },
-  abortButton: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#dc2626",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  abortButtonText: {
-    fontSize: 12,
-    color: "#dc2626",
-    fontWeight: "700",
-  },
-  rowBetween: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  rowGap8: {
-    flexDirection: "row",
-    gap: 8,
   },
   sessionsList: {
     gap: 6,
@@ -1248,11 +908,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     padding: 8,
   },
-  sendingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
   chatInput: {
     borderWidth: 1,
     borderColor: "#cbd5e1",
@@ -1262,6 +917,23 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     color: "#0f172a",
     textAlignVertical: "top",
+  },
+  sendingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  abortButton: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#dc2626",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  abortButtonText: {
+    fontSize: 12,
+    color: "#dc2626",
+    fontWeight: "700",
   },
   logsBox: {
     borderWidth: 1,
