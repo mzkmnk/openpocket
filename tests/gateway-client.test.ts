@@ -267,6 +267,9 @@ describe("GatewayClient", () => {
     socket.emitErrorResponse(connectReq.id, { code: "AUTH_FAILED", message: "invalid token" });
 
     await expect(connectPromise).rejects.toThrow("invalid token");
+    await expect(connectPromise).rejects.toMatchObject({
+      code: "AUTH_FAILED",
+    });
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(sockets).toHaveLength(1);
