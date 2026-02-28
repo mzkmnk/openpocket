@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "create-pr": {
+      "source": "n8n-io/n8n",
+      "sourceType": "github",
+      "computedHash": "0c808831227fce10c896d29f1cfa6258e819fb4a3dd093466783625b7f08249d"
+    },
     "vercel-react-native-skills": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
