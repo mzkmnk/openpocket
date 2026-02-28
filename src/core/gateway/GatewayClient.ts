@@ -171,6 +171,7 @@ export class GatewayClient {
   private shouldReconnect = false;
   private connectInput: GatewayConnectInput | null = null;
   private isReconnectFlow = false;
+  private handshakeReject: ((error: Error) => void) | null = null;
 
   private status: GatewayConnectionStatus = "disconnected";
 
@@ -228,6 +229,7 @@ export class GatewayClient {
     this.connectInput = input;
     this.shouldReconnect = true;
     this.clearReconnectTimer();
+    this.cancelHandshake("connect restarted");
     this.disconnectSocket();
     this.rejectAllPending("connect restarted");
 
@@ -239,8 +241,12 @@ export class GatewayClient {
       return hello;
     } catch (error) {
       const normalized = normalizeError(error);
+      const isControlledCancel =
+        normalized.message === "disconnected" || normalized.message === "connect restarted";
+      if (!this.shouldReconnect || isControlledCancel) {
+        throw normalized;
+      }
       this.setStatus("error", normalized.message);
-      this.scheduleReconnect("connect failed");
       throw normalized;
     }
   }
@@ -253,6 +259,7 @@ export class GatewayClient {
     this.shouldReconnect = false;
     this.isReconnectFlow = false;
     this.clearReconnectTimer();
+    this.cancelHandshake("disconnected");
     this.disconnectSocket();
     this.rejectAllPending("disconnected");
     this.setStatus("disconnected", "Disconnected by user");
@@ -339,9 +346,19 @@ export class GatewayClient {
 
       const settleReject = (error: Error): void => {
         if (!handshakeDone) {
+          handshakeDone = true;
+          this.handshakeReject = null;
           reject(error);
         }
       };
+      const settleResolve = (hello: unknown): void => {
+        if (!handshakeDone) {
+          handshakeDone = true;
+          this.handshakeReject = null;
+          resolve(hello);
+        }
+      };
+      this.handshakeReject = settleReject;
 
       socket.onopen = () => {
         this.log(isReconnect ? "WS opened (reconnect)" : "WS opened");
@@ -374,9 +391,8 @@ export class GatewayClient {
               const connectParams = await input.buildConnectParams(packet.payload);
               this.log(`connect params: ${JSON.stringify(sanitizeForLog(connectParams))}`);
               const hello = await this.request("connect", connectParams);
-              handshakeDone = true;
               this.setStatus("connected", "Connected");
-              resolve(hello);
+              settleResolve(hello);
             } catch (error) {
               const normalized = normalizeError(error);
               this.log(`connect failed: ${normalized.message}`);
@@ -502,6 +518,22 @@ export class GatewayClient {
     }
     this.clearScheduledTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+  }
+
+  /**
+   * Rejects an in-flight handshake promise when connection flow is interrupted.
+   * 接続フローが中断されたときに進行中ハンドシェイク Promise を reject します。
+   *
+   * @param reason - Error message to reject the handshake promise.
+   *                 ハンドシェイク Promise を reject するエラーメッセージ。
+   */
+  private cancelHandshake(reason: string): void {
+    if (!this.handshakeReject) {
+      return;
+    }
+    const reject = this.handshakeReject;
+    this.handshakeReject = null;
+    reject(new Error(reason));
   }
 
   /**

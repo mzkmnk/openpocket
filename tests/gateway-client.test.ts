@@ -34,6 +34,10 @@ class MockWebSocket implements GatewayWebSocketLike {
     this.onmessage?.({ data: JSON.stringify({ type: "res", id, ok: true, payload }) });
   }
 
+  emitErrorResponse(id: string, error?: unknown): void {
+    this.onmessage?.({ data: JSON.stringify({ type: "res", id, ok: false, error }) });
+  }
+
   emitClose(): void {
     this.readyState = 3;
     this.onclose?.();
@@ -195,5 +199,62 @@ describe("GatewayClient", () => {
     expect(client.getStatus()).toBe("connected");
     expect(connectBuildCount).toBe(2);
     expect(statuses).toContain("reconnecting");
+  });
+
+  it("rejects in-flight connect when disconnected before handshake completion", async () => {
+    const sockets: MockWebSocket[] = [];
+    const client = new GatewayClient({
+      createWebSocket: () => {
+        const socket = new MockWebSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const connectPromise = client.connect({
+      gatewayUrl: "wss://gateway.example.ts.net/",
+      buildConnectParams: () => ({ role: "operator" }),
+    });
+
+    sockets[0].emitOpen();
+    client.disconnect();
+
+    await expect(connectPromise).rejects.toThrow("disconnected");
+    expect(client.getStatus()).toBe("disconnected");
+  });
+
+  it("does not auto-reconnect on connect response failure", async () => {
+    vi.useFakeTimers();
+
+    const sockets: MockWebSocket[] = [];
+    const client = new GatewayClient({
+      createWebSocket: () => {
+        const socket = new MockWebSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      reconnect: {
+        initialDelayMs: 200,
+        maxDelayMs: 200,
+      },
+    });
+
+    const connectPromise = client.connect({
+      gatewayUrl: "wss://gateway.example.ts.net/",
+      buildConnectParams: () => ({ role: "operator" }),
+    });
+
+    const socket = sockets[0];
+    socket.emitOpen();
+    socket.emitEvent("connect.challenge", { nonce: "n1" });
+    await flushMicrotasks();
+
+    const connectReq = parseLastReq(socket);
+    socket.emitErrorResponse(connectReq.id, { code: "AUTH_FAILED", message: "invalid token" });
+
+    await expect(connectPromise).rejects.toThrow("invalid token");
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sockets).toHaveLength(1);
   });
 });
