@@ -26,3 +26,30 @@ function validateSettlement(order: Order, now: Date): boolean {
   // ...
 }
 ```
+
+## PR Description Rule (English + Japanese Accordion)
+
+When writing pull request descriptions, always write the main content in English, and include the Japanese version inside an accordion (`<details>` block).
+
+- Keep English as the primary body text.
+- Add a `## Japanese` section using `<details>` and `<summary>Japanese</summary>`.
+- Ensure the Japanese content matches the English content in meaning.
+
+Example:
+
+```md
+## Summary
+
+- Add validation for settlement windows.
+- Update unit tests for JP-specific cases.
+
+<details>
+<summary>Japanese</summary>
+
+## 日本語
+
+- 決済可能時間帯のバリデーションを追加。
+- 日本向けケースのユニットテストを更新。
+
+</details>
+```
