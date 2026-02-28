@@ -314,7 +314,7 @@ export default function App() {
               // IMPORTANT: OpenClaw Gateway token auth expects auth.token to be present.
               // Also, the token string used in the signature payload must match auth.token.
               // Prefer deviceToken once issued; otherwise require the gateway token.
-              const tokenForAuth = identityData.deviceToken || nextToken || "";
+              const tokenForAuth = (identityData.deviceToken || nextToken || "").trim();
               if (!tokenForAuth) {
                 throw new Error("Gateway token is required (auth.token). Paste your gateway token, then retry.");
               }
