@@ -321,7 +321,9 @@ export default function App() {
                   // operator clients to use a desktop-like platform string.
                   // For PoC we pin to "macos" to satisfy the schema.
                   platform: "macos",
-                  mode: "operator",
+                  // client.mode must be a gateway-known client mode (not the role).
+                  // Use "cli" for now (matches built-in CLI client mode).
+                  mode: "cli",
                 },
                 auth: {
                   token: nextToken || undefined,
@@ -343,38 +345,6 @@ export default function App() {
               appendLog(`connect params json:\n${JSON.stringify(connectParams, null, 2)}`);
 
               const hello = await call("connect", connectParams);
-                minProtocol: 3,
-                maxProtocol: 3,
-                role: "operator",
-                scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
-                // Some gateway schema branches treat these as required (even for operators).
-                caps: [],
-                commands: [],
-                permissions: {},
-                locale: "ja-JP",
-                userAgent: "openpocket/0.0.1",
-                client: {
-                  id: "cli",
-                  version: "openpocket/0.0.1",
-                  // NOTE: Gateway protocol validation currently expects
-                  // operator clients to use a desktop-like platform string.
-                  // For PoC we pin to "macos" to satisfy the schema.
-                  platform: "macos",
-                  mode: "operator",
-                },
-                auth: {
-                  token: nextToken || undefined,
-                  password: nextPassword || undefined,
-                  deviceToken: identityData.deviceToken,
-                },
-                device: {
-                  id: identityData.deviceId,
-                  publicKey: identityData.publicKey,
-                  nonce,
-                  signedAt: signed.signedAt,
-                  signature: signed.signature,
-                },
-              });
 
               const helloRec = asRecord(hello);
               const authRec = asRecord(helloRec?.auth);

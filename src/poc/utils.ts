@@ -70,12 +70,11 @@ export function extractSessionItems(payload: unknown): SessionItem[] {
       }
       return {
         key: item.key,
-        label: typeof item.label === "string" ? item.label : undefined,
-        updatedAt:
-          typeof item.updatedAt === "string" || typeof item.updatedAt === "number"
-            ? item.updatedAt
-            : undefined,
-      } satisfies SessionItem;
+        ...(typeof item.label === "string" ? { label: item.label } : {}),
+        ...(typeof item.updatedAt === "string" || typeof item.updatedAt === "number"
+          ? { updatedAt: item.updatedAt }
+          : {}),
+      } as SessionItem;
     })
     .filter((item): item is SessionItem => item !== null);
 }
@@ -109,8 +108,8 @@ export function extractHistoryMessages(payload: unknown): ChatMessage[] {
         id: typeof item.id === "string" ? item.id : `hist_${idx}_${Date.now()}`,
         role,
         text,
-        runId: typeof item.runId === "string" ? item.runId : undefined,
-      } satisfies ChatMessage;
+        ...(typeof item.runId === "string" ? { runId: item.runId } : {}),
+      } as ChatMessage;
     })
     .filter((item): item is ChatMessage => item !== null);
 }
