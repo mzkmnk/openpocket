@@ -1,12 +1,12 @@
 import type {
-    GatewayClientOptions,
-    GatewayConnectInput,
-    GatewayConnectionStatus,
-    GatewayEventPacket,
-    GatewayPacket,
-    GatewayRequestPacket,
-    GatewayResponsePacket,
-    GatewayWebSocketLike,
+  GatewayClientOptions,
+  GatewayConnectInput,
+  GatewayConnectionStatus,
+  GatewayEventPacket,
+  GatewayPacket,
+  GatewayRequestPacket,
+  GatewayResponsePacket,
+  GatewayWebSocketLike,
 } from "./types";
 
 /**
@@ -107,7 +107,10 @@ function sanitizeForLog(input: unknown): unknown {
   const next: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     const lower = key.toLowerCase();
-    if (typeof value === "string" && (lower.includes("token") || lower.includes("password") || lower.includes("secret"))) {
+    if (
+      typeof value === "string" &&
+      (lower.includes("token") || lower.includes("password") || lower.includes("secret"))
+    ) {
       next[key] = sanitizeSecret(value);
       continue;
     }
@@ -147,7 +150,10 @@ function parsePacket(raw: string | ArrayBuffer | ArrayBufferView): GatewayPacket
  */
 export class GatewayClient {
   private readonly createWebSocket: (url: string) => GatewayWebSocketLike;
-  private readonly scheduleTimeout: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  private readonly scheduleTimeout: (
+    callback: () => void,
+    ms: number,
+  ) => ReturnType<typeof setTimeout>;
   private readonly clearScheduledTimeout: (timer: ReturnType<typeof setTimeout>) => void;
   private readonly now: () => number;
   private readonly randomId: () => string;
@@ -192,7 +198,8 @@ export class GatewayClient {
     this.onLog = options.onLog;
 
     this.reconnectEnabled = options.reconnect?.enabled ?? DEFAULT_RECONNECT.enabled;
-    this.reconnectInitialDelayMs = options.reconnect?.initialDelayMs ?? DEFAULT_RECONNECT.initialDelayMs;
+    this.reconnectInitialDelayMs =
+      options.reconnect?.initialDelayMs ?? DEFAULT_RECONNECT.initialDelayMs;
     this.reconnectMaxDelayMs = options.reconnect?.maxDelayMs ?? DEFAULT_RECONNECT.maxDelayMs;
     this.reconnectFactor = options.reconnect?.factor ?? DEFAULT_RECONNECT.factor;
   }
@@ -422,7 +429,7 @@ export class GatewayClient {
     const message =
       typeof packet.error === "string"
         ? packet.error
-        : packet.error?.message ?? packet.error?.code ?? "Gateway request failed";
+        : (packet.error?.message ?? packet.error?.code ?? "Gateway request failed");
     pending.reject(new Error(message));
   }
 
