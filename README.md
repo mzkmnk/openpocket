@@ -40,4 +40,4 @@ The app connects to OpenClaw Gateway over WebSocket and focuses on session-based
 
 ## License
 
-MIT
+Proprietary (All rights reserved)

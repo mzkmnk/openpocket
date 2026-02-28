@@ -40,4 +40,4 @@ WebSocket 経由で OpenClaw Gateway に接続し、セッション単位の運�
 
 ## ライセンス
 
-MIT
+Proprietary（無断改変・無断公開禁止）
