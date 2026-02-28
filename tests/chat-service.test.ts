@@ -203,7 +203,9 @@ describe("ChatService", () => {
     const requester = new MockRequester();
     const service = new ChatService(requester);
 
-    expect(() => service.onChatEvent(() => undefined)).toThrow("Chat event source is not configured");
+    expect(() => service.onChatEvent(() => undefined)).toThrow(
+      "Chat event source is not configured",
+    );
   });
 
   // chat.history payload が不正な場合はエラーにすること
@@ -217,4 +219,3 @@ describe("ChatService", () => {
     );
   });
 });
-

@@ -103,4 +103,3 @@ export type ChatEventPayload = {
  *                 生の Gateway イベント packet。
  */
 export type ChatEventListener = (payload: ChatEventPayload, packet: GatewayEventPacket) => void;
-

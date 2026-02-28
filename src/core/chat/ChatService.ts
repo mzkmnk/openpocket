@@ -50,14 +50,22 @@ function isChatState(value: unknown): value is ChatEventPayload["state"] {
 }
 
 function parseHistoryResult(payload: unknown): ChatHistoryResult {
-  if (!isRecord(payload) || typeof payload.sessionKey !== "string" || !Array.isArray(payload.messages)) {
+  if (
+    !isRecord(payload) ||
+    typeof payload.sessionKey !== "string" ||
+    !Array.isArray(payload.messages)
+  ) {
     throw new Error("Invalid chat.history response payload");
   }
   return payload as ChatHistoryResult;
 }
 
 function parseSendAck(payload: unknown): ChatSendAck {
-  if (!isRecord(payload) || typeof payload.runId !== "string" || typeof payload.status !== "string") {
+  if (
+    !isRecord(payload) ||
+    typeof payload.runId !== "string" ||
+    typeof payload.status !== "string"
+  ) {
     throw new Error("Invalid chat.send response payload");
   }
   if (payload.status === "error") {
@@ -217,4 +225,3 @@ export class ChatService {
     return `${sessionKey}:${this.now()}:${this.randomId()}`;
   }
 }
-
