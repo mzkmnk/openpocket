@@ -311,8 +311,11 @@ export default function App() {
                 client: {
                   id: "cli",
                   version: "openpocket/0.0.1",
-                  platform: Platform.OS,
-                  mode: "operator",
+                  // NOTE: Gateway protocol validation currently expects
+                  // operator clients to use a desktop-like platform string.
+                  // For PoC we pin to "macos" to satisfy the schema.
+                  platform: "macos",
+                  mode: "operator", 
                 },
                 auth: {
                   token: nextToken || undefined,
