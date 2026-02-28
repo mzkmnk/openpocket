@@ -18,9 +18,11 @@ import {
 } from "./src/core/security/connectionSecrets";
 import {
   loadOrCreateDeviceIdentity,
+  persistDeviceToken,
   type DeviceIdentity,
   type DeviceIdentityLoadResult,
 } from "./src/core/security/deviceIdentity";
+import { buildGatewayOperatorConnectParams } from "./src/core/security/deviceAuth";
 import type { SecureStoreAdapter } from "./src/core/security/secureStore";
 import {
   AdvancedSettingsSection,
@@ -37,6 +39,10 @@ import {
 } from "./src/features/connectionSetup";
 
 import "./global.css";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
 function createStoreAdapter(): SecureStoreAdapter {
   if (Platform.OS === "web") {
@@ -162,21 +168,26 @@ export default function App() {
 
       const loadedIdentity = identity ?? (await ensureIdentity()).identity;
 
-      await client.connect({
+      const hello = await client.connect({
         gatewayUrl: normalizedGatewayUrl,
         buildConnectParams: (challengePayload) => {
-          return {
-            auth: { token: normalizedToken },
-            device: {
-              deviceId: loadedIdentity.deviceId,
-              publicKey: loadedIdentity.publicKey,
-              deviceToken: loadedIdentity.deviceToken,
-            },
-            challenge: challengePayload,
-            role: "operator",
-          };
+          return buildGatewayOperatorConnectParams({
+            challengePayload,
+            identity: loadedIdentity,
+            token: normalizedToken,
+          });
         },
       });
+
+      if (isRecord(hello) && isRecord(hello.auth) && typeof hello.auth.deviceToken === "string") {
+        const nextIdentity = await persistDeviceToken(
+          store,
+          loadedIdentity,
+          hello.auth.deviceToken,
+        );
+        setIdentity(nextIdentity);
+        setDeviceInfo(`updated: ${nextIdentity.deviceId.slice(0, 12)}...`);
+      }
 
       setNotice("Connection established");
       setConnectionError(null);
