@@ -35,7 +35,6 @@ import {
 } from "../../core/security/deviceIdentity";
 import { buildGatewayOperatorConnectParams } from "../../core/security/deviceAuth";
 import type { SecureStoreAdapter } from "../../core/security/secureStore";
-import { quickActions } from "../../features/chat/mockData";
 import type { RootStackParamList } from "../../router/types";
 
 type ChatNavigationProp = NativeStackNavigationProp<RootStackParamList, "internal/chat">;
@@ -192,12 +191,15 @@ export function ChatScreen() {
     initialScrollRunningRef.current = false;
   }, []);
 
-  const scrollToBottom = useCallback((animated: boolean) => {
-    cancelInitialScrollAnimation();
-    requestAnimationFrame(() => {
-      messagesScrollRef.current?.scrollToEnd({ animated });
-    });
-  }, [cancelInitialScrollAnimation]);
+  const scrollToBottom = useCallback(
+    (animated: boolean) => {
+      cancelInitialScrollAnimation();
+      requestAnimationFrame(() => {
+        messagesScrollRef.current?.scrollToEnd({ animated });
+      });
+    },
+    [cancelInitialScrollAnimation],
+  );
 
   const maybeRunInitialScroll = useCallback(() => {
     if (
@@ -590,7 +592,9 @@ export function ChatScreen() {
                     <Text style={styles.metaTime}>typing...</Text>
                   </View>
                   <View style={[styles.bubble, styles.assistantBubble]}>
-                    <Text style={[styles.bubbleText, styles.assistantBubbleText]}>{streamText}</Text>
+                    <Text style={[styles.bubbleText, styles.assistantBubbleText]}>
+                      {streamText}
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -599,32 +603,17 @@ export function ChatScreen() {
         )}
 
         <View style={styles.footer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.quickActionsWrap}
-            keyboardShouldPersistTaps="handled"
-          >
-            {quickActions.map((action) => (
-              <Pressable
-                key={action.id}
-                style={styles.quickAction}
-                onPress={() => setDraft(action.label)}
-              >
-                <Text style={styles.quickActionText}>{action.label}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          <View style={styles.inputWrap}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Message OpenClaw..."
-              placeholderTextColor="#71717A"
-              style={styles.textInput}
-              multiline
-            />
+          <View style={styles.inputRow}>
+            <View style={styles.inputWrap}>
+              <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                placeholder="Message OpenClaw..."
+                placeholderTextColor="#71717A"
+                style={styles.textInput}
+                multiline
+              />
+            </View>
             {isStreaming ? (
               <Pressable style={styles.abortButton} onPress={() => void abortMessage()}>
                 <Text style={styles.abortButtonText}>Stop</Text>
@@ -849,46 +838,31 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   footer: {
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
     backgroundColor: "rgba(255, 255, 255, 0.96)",
     paddingHorizontal: 14,
-    paddingTop: 8,
+    paddingTop: 14,
     paddingBottom: 12,
   },
-  quickActionsWrap: {
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
     gap: 8,
-    paddingBottom: 8,
-    paddingHorizontal: 2,
-  },
-  quickAction: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  quickActionText: {
-    color: "#334155",
-    fontFamily: "SpaceGrotesk_500Medium",
-    fontSize: 11,
   },
   inputWrap: {
+    flex: 1,
+    minHeight: 34,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E2E8F0",
     backgroundColor: "#F8FAFC",
     paddingHorizontal: 6,
-    paddingVertical: 6,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 6,
+    paddingVertical: 0,
+    justifyContent: "center",
   },
   textInput: {
     flex: 1,
     maxHeight: 120,
-    minHeight: 34,
+    minHeight: 22,
     color: "#0F172A",
     fontSize: 14,
     lineHeight: 20,
@@ -899,7 +873,7 @@ const styles = StyleSheet.create({
   sendButton: {
     width: 34,
     height: 34,
-    borderRadius: 8,
+    borderRadius: 9999,
     backgroundColor: "#3B82F6",
     alignItems: "center",
     justifyContent: "center",
