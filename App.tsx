@@ -302,13 +302,18 @@ export default function App() {
               const identityData = await getOrCreateIdentity();
               setIdentity(identityData);
 
+              // IMPORTANT: the token string used in the signature payload must match
+              // the token actually sent in `auth.token`.
+              // Prefer deviceToken once issued (like Control UI), otherwise fall back to gateway token.
+              const tokenForAuth = identityData.deviceToken || nextToken || undefined;
+
               const signed = await makeSignature(identityData, {
                 nonce,
                 clientId: "cli",
                 clientMode: "cli",
                 role: "operator",
                 scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
-                token: nextToken || undefined,
+                token: tokenForAuth,
               });
               const connectParams = {
                 minProtocol: 3,
@@ -333,9 +338,8 @@ export default function App() {
                   mode: "cli",
                 },
                 auth: {
-                  token: nextToken || undefined,
+                  token: tokenForAuth,
                   password: nextPassword || undefined,
-                  deviceToken: identityData.deviceToken,
                 },
                 device: {
                   id: identityData.deviceId,
