@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { hasPersistedGatewayConnectionSecrets } from "../src/core/auth/bootstrapAuth";
 import { bytesToBase64Url } from "../src/core/security/base64url";
 import {
   clearGatewayConnectionSecrets,
@@ -49,6 +50,24 @@ describe("security storage", () => {
       gatewayUrl: "",
       token: "",
     });
+  });
+
+  // gatewayUrl と token の両方がある場合のみログイン済み判定になること
+  it("returns true only when both gatewayUrl and token are persisted", async () => {
+    const store = new MemoryStore();
+    await saveGatewayConnectionSecrets(store, {
+      gatewayUrl: "wss://example.ts.net/ws",
+      token: "token-1",
+    });
+
+    await expect(hasPersistedGatewayConnectionSecrets(store)).resolves.toBe(true);
+
+    await clearGatewayConnectionSecrets(store);
+    await saveGatewayConnectionSecrets(store, {
+      gatewayUrl: "wss://example.ts.net/ws",
+      token: "   ",
+    });
+    await expect(hasPersistedGatewayConnectionSecrets(store)).resolves.toBe(false);
   });
 
   // 端末識別情報の作成後に再読み込み時は同一IDが維持されること

@@ -193,7 +193,7 @@ export function LoginScreen() {
 
       setNotice("Connection established");
       setConnectionError(null);
-      navigation.navigate("internal/sessions");
+      navigation.replace("internal/sessions");
     } catch (error) {
       const classified = classifyError(error);
       setConnectionError(classified);
