@@ -15,6 +15,29 @@ function bytesToHex(bytes: Uint8Array): string {
     .join("");
 }
 
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.trim().toLowerCase();
+  if (clean.length % 2 !== 0) {
+    throw new Error("Invalid hex");
+  }
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+// noble-ed25519 uses WebCrypto for SHA-512 by default. React Native does not.
+// Override to use expo-crypto so Ed25519 works on native.
+(ed25519.hashes as any).sha512Async = async (message: Uint8Array) => {
+  const hex = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA512,
+    bytesToHex(message),
+    { encoding: Crypto.CryptoEncoding.HEX },
+  );
+  return hexToBytes(hex);
+};
+
 async function readStoredIdentity(): Promise<DeviceIdentity | null> {
   const g = globalThis as any;
   const raw =
