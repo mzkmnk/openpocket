@@ -2,6 +2,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import { LoginScreen } from "../screens/auth/LoginScreen";
+import { ChatScreen } from "../screens/internal/ChatScreen";
 import { SessionsScreen } from "../screens/internal/SessionsScreen";
 import type { RootStackParamList } from "./types";
 
@@ -19,6 +20,7 @@ export function AppRouter() {
       >
         <Stack.Screen name="auth/login" component={LoginScreen} />
         <Stack.Screen name="internal/sessions" component={SessionsScreen} />
+        <Stack.Screen name="internal/chat" component={ChatScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
