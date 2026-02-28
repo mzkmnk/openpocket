@@ -6,9 +6,7 @@ import "./global.css";
 export default function App() {
   return (
     <View className="flex-1 items-center justify-center bg-white">
-      <Text className="text-lg font-semibold text-slate-900">
-        openpocket is ready.
-      </Text>
+      <Text className="text-lg font-semibold text-slate-900">openpocket is ready.</Text>
       <StatusBar style="auto" />
     </View>
   );

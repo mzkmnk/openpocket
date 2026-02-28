@@ -1,0 +1,8 @@
+node_modules
+.expo
+.agents
+docs
+dist
+web-build
+pnpm-lock.yaml
+assets
