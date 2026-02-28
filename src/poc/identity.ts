@@ -3,6 +3,7 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 
 import * as ed25519 from "@noble/ed25519";
+import { sha256 as sha256Hex } from "js-sha256";
 
 import { base64UrlToBytes, bytesToBase64Url } from "./base64";
 import type { DeviceIdentity } from "./types";
@@ -25,6 +26,11 @@ function hexToBytes(hex: string): Uint8Array {
     out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
+}
+
+function deviceIdFromPublicKey(publicKey: Uint8Array): string {
+  // Control UI: sha256(publicKeyBytes) -> hex
+  return sha256Hex(publicKey);
 }
 
 // noble-ed25519 uses WebCrypto for SHA-512 by default. React Native does not.
@@ -67,12 +73,22 @@ async function readStoredIdentity(): Promise<DeviceIdentity | null> {
       return null;
     }
 
-    return {
-      deviceId: parsed.deviceId,
+    const publicKeyBytes = base64UrlToBytes(parsed.publicKey);
+    const expectedDeviceId = deviceIdFromPublicKey(publicKeyBytes);
+
+    const identity: DeviceIdentity = {
+      deviceId: expectedDeviceId,
       publicKey: parsed.publicKey,
       privateKey: parsed.privateKey,
       deviceToken: typeof parsed.deviceToken === "string" ? parsed.deviceToken : undefined,
     };
+
+    // If stored deviceId differs (older algorithm), self-heal by overwriting.
+    if (parsed.deviceId !== expectedDeviceId) {
+      await saveIdentity(identity);
+    }
+
+    return identity;
   } catch {
     return null;
   }
@@ -113,12 +129,7 @@ export async function getOrCreateIdentity(): Promise<DeviceIdentity> {
   const secretKey = randomBytes(32);
   const publicKey = await ed25519.getPublicKeyAsync(secretKey);
 
-  // Use expo-crypto for sha256 to avoid WebCrypto dependency on native.
-  const deviceId = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    bytesToHex(publicKey),
-    { encoding: Crypto.CryptoEncoding.HEX },
-  );
+  const deviceId = deviceIdFromPublicKey(publicKey);
 
   const identity: DeviceIdentity = {
     deviceId,
