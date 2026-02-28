@@ -22,7 +22,6 @@
   "dependencies": {
     "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@noble/ed25519": "^3.0.0",
-    "@noble/hashes": "^2.0.1",
     "expo": "~54.0.0",
     "expo-clipboard": "~8.0.7",
     "expo-crypto": "~15.0.7",

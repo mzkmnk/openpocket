@@ -3,7 +3,6 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 
 import * as ed25519 from "@noble/ed25519";
-import { sha256 } from "@noble/hashes/sha2.js";
 
 import { base64UrlToBytes, bytesToBase64Url } from "./base64";
 import type { DeviceIdentity } from "./types";
@@ -90,7 +89,13 @@ export async function getOrCreateIdentity(): Promise<DeviceIdentity> {
   // - deviceId: sha256(publicKeyBytes) as hex
   const secretKey = randomBytes(32);
   const publicKey = await ed25519.getPublicKeyAsync(secretKey);
-  const deviceId = bytesToHex(sha256(publicKey));
+
+  // Use expo-crypto for sha256 to avoid WebCrypto dependency on native.
+  const deviceId = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    bytesToHex(publicKey),
+    { encoding: Crypto.CryptoEncoding.HEX },
+  );
 
   const identity: DeviceIdentity = {
     deviceId,
