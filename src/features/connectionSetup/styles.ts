@@ -192,9 +192,6 @@ export const styles = StyleSheet.create({
     gap: 4,
     overflow: "hidden",
   },
-  errorCardCompact: {
-    minHeight: 92,
-  },
   errorTitle: {
     color: "#b91c1c",
     fontFamily: "SpaceGrotesk_700Bold",
@@ -245,7 +242,6 @@ export const styles = StyleSheet.create({
   },
   errorSlot: {
     alignSelf: "stretch",
-    minHeight: 92,
     overflow: "hidden",
   },
   advancedSection: {

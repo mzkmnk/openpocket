@@ -24,7 +24,7 @@ export function ConnectionErrorCard({ error, onReconnect }: ConnectionErrorCardP
   const isPairingRequired = error.category === "PAIRING_REQUIRED";
 
   return (
-    <View style={[styles.errorCard, !isPairingRequired ? styles.errorCardCompact : null]}>
+    <View style={styles.errorCard}>
       <Text style={styles.errorTitle}>Connection Error ({error.category})</Text>
       {error.code ? <Text style={styles.caption}>Code: {error.code}</Text> : null}
       <Text style={styles.errorBody} numberOfLines={isPairingRequired ? 3 : 2} ellipsizeMode="tail">
