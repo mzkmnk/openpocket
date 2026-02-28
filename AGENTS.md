@@ -53,3 +53,21 @@ Example:
 
 </details>
 ```
+
+## Test Case Name Comment Rule (Japanese)
+
+When writing tests with English `it(...)` names, add a Japanese comment line immediately above each test case.
+
+- Format:
+  - `// <Japanese test case description>`
+  - `it("...")`
+- Keep the Japanese comment aligned with the meaning of the English test case name.
+
+Example:
+
+```ts
+// 接続ハンドシェイク後に request/response が正しく動作すること
+it("connects with challenge handshake and supports request/response", async () => {
+  // ...
+});
+```
