@@ -12,7 +12,10 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "OpenPocket uses Face ID to protect your sessions."
+      }
     },
     "android": {
       "adaptiveIcon": {
