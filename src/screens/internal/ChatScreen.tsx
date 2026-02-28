@@ -5,10 +5,15 @@ import {
   useFonts,
 } from "@expo-google-fonts/space-grotesk";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import * as Crypto from "expo-crypto";
+import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -18,16 +23,128 @@ import {
   View,
 } from "react-native";
 
-import { mockMessages, quickActions } from "../../features/chat/mockData";
+import { ChatService } from "../../core/chat/ChatService";
+import type { ChatEventPayload } from "../../core/chat/types";
+import { GatewayClient } from "../../core/gateway/GatewayClient";
+import { loadGatewayConnectionSecrets } from "../../core/security/connectionSecrets";
+import {
+  loadOrCreateDeviceIdentity,
+  persistDeviceToken,
+  type DeviceIdentity,
+} from "../../core/security/deviceIdentity";
+import { buildGatewayOperatorConnectParams } from "../../core/security/deviceAuth";
+import type { SecureStoreAdapter } from "../../core/security/secureStore";
+import { quickActions } from "../../features/chat/mockData";
 import type { RootStackParamList } from "../../router/types";
 
 type ChatNavigationProp = NativeStackNavigationProp<RootStackParamList, "internal/chat">;
+type ChatRouteProp = RouteProp<RootStackParamList, "internal/chat">;
 
-function initialsForAuthor(author: string): string {
-  if (author.toLowerCase() === "you") {
-    return "YO";
+type UiMessage = {
+  id: string;
+  role: "assistant" | "user";
+  body: string;
+  time: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function createStoreAdapter(): SecureStoreAdapter {
+  if (Platform.OS === "web") {
+    return {
+      async getItem(key) {
+        return globalThis.localStorage?.getItem(key) ?? null;
+      },
+      async setItem(key, value) {
+        globalThis.localStorage?.setItem(key, value);
+      },
+      async deleteItem(key) {
+        globalThis.localStorage?.removeItem(key);
+      },
+    };
   }
-  return "OC";
+
+  return {
+    getItem: (key) => SecureStore.getItemAsync(key),
+    setItem: (key, value) => SecureStore.setItemAsync(key, value),
+    deleteItem: (key) => SecureStore.deleteItemAsync(key),
+  };
+}
+
+function formatTime(value?: number): string {
+  const now = value ? new Date(value) : new Date();
+  return new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" }).format(now);
+}
+
+function extractTextFromUnknown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const chunks = value
+      .map((item) => extractTextFromUnknown(item))
+      .filter((item) => item.trim().length > 0);
+    return chunks.join("\n").trim();
+  }
+  if (!isRecord(value)) {
+    return "";
+  }
+
+  if (typeof value.text === "string") {
+    return value.text;
+  }
+  if (typeof value.content === "string") {
+    return value.content;
+  }
+  if (Array.isArray(value.content)) {
+    return extractTextFromUnknown(value.content);
+  }
+  if (Array.isArray(value.parts)) {
+    return extractTextFromUnknown(value.parts);
+  }
+  if (Array.isArray(value.items)) {
+    return extractTextFromUnknown(value.items);
+  }
+  if (isRecord(value.message)) {
+    return extractTextFromUnknown(value.message);
+  }
+  return "";
+}
+
+function mapHistoryMessages(messages: unknown[]): UiMessage[] {
+  return messages
+    .map((message, index) => {
+      if (!isRecord(message)) {
+        return null;
+      }
+
+      const role = message.role === "assistant" ? "assistant" : "user";
+      const body = extractTextFromUnknown(message);
+      const createdAt =
+        typeof message.createdAt === "number"
+          ? message.createdAt
+          : typeof message.timestamp === "number"
+            ? message.timestamp
+            : undefined;
+
+      if (body.trim().length === 0) {
+        return null;
+      }
+
+      return {
+        id: `history-${index}`,
+        role,
+        body: body.trim(),
+        time: formatTime(createdAt),
+      } satisfies UiMessage;
+    })
+    .filter((message): message is UiMessage => message !== null);
+}
+
+function initialsForRole(role: UiMessage["role"]): string {
+  return role === "assistant" ? "OC" : "YO";
 }
 
 export function ChatScreen() {
@@ -37,16 +154,224 @@ export function ChatScreen() {
     SpaceGrotesk_700Bold,
   });
   const navigation = useNavigation<ChatNavigationProp>();
-  const route = useRoute();
-  const params = route.params as RootStackParamList["internal/chat"] | undefined;
-  const [draft, setDraft] = useState("");
+  const route = useRoute<ChatRouteProp>();
+  const store = useMemo(() => createStoreAdapter(), []);
 
-  const sessionTitle = useMemo(() => {
-    if (params?.sessionLabel && params.sessionLabel.trim().length > 0) {
-      return params.sessionLabel.trim();
+  const sessionKey = route.params?.sessionKey?.trim() ?? "";
+  const sessionLabel = route.params?.sessionLabel?.trim() ?? "Chat";
+
+  const clientRef = useRef<GatewayClient | null>(null);
+  const chatServiceRef = useRef<ChatService | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
+  const streamTextRef = useRef("");
+
+  const [messages, setMessages] = useState<UiMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [streamText, setStreamText] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [connectionDetail, setConnectionDetail] = useState("Connecting to gateway...");
+  const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
+
+  const setStreamingText = useCallback((next: string) => {
+    streamTextRef.current = next;
+    setStreamText(next);
+  }, []);
+
+  const appendAssistantMessage = useCallback((body: string) => {
+    const normalized = body.trim();
+    if (normalized.length === 0) {
+      return;
     }
-    return "Chat";
-  }, [params?.sessionLabel]);
+    setMessages((current) => [
+      ...current,
+      {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        body: normalized,
+        time: formatTime(),
+      },
+    ]);
+  }, []);
+
+  const onChatEvent = useCallback(
+    (payload: ChatEventPayload) => {
+      if (activeRunIdRef.current && payload.runId !== activeRunIdRef.current) {
+        return;
+      }
+
+      if (payload.state === "delta") {
+        const delta = extractTextFromUnknown(payload.message);
+        if (delta.length > 0) {
+          setStreamingText(delta);
+          setIsStreaming(true);
+        }
+        return;
+      }
+
+      if (payload.state === "final") {
+        const finalText = extractTextFromUnknown(payload.message) || streamTextRef.current;
+        appendAssistantMessage(finalText);
+        activeRunIdRef.current = null;
+        setStreamingText("");
+        setIsStreaming(false);
+        return;
+      }
+
+      if (payload.state === "aborted") {
+        const finalText = extractTextFromUnknown(payload.message) || streamTextRef.current;
+        appendAssistantMessage(finalText);
+        activeRunIdRef.current = null;
+        setStreamingText("");
+        setIsStreaming(false);
+        return;
+      }
+
+      if (payload.state === "error") {
+        activeRunIdRef.current = null;
+        setStreamingText("");
+        setIsStreaming(false);
+        setErrorMessage(payload.errorMessage ?? "Chat stream failed");
+      }
+    },
+    [appendAssistantMessage, setStreamingText],
+  );
+
+  const initialize = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    if (!sessionKey) {
+      setErrorMessage("Session key is required. Please open chat from the sessions screen.");
+      setConnectionDetail("Session key is missing");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const secrets = await loadGatewayConnectionSecrets(store);
+      if (!secrets.gatewayUrl.trim() || !secrets.token.trim()) {
+        throw new Error("Gateway URL or token is missing. Please reconnect from the login screen.");
+      }
+
+      const loadedIdentity = await loadOrCreateDeviceIdentity(store, Crypto.getRandomBytes);
+      setIdentity(loadedIdentity.identity);
+
+      const client = new GatewayClient({
+        onStatusChange(_status, detail) {
+          setConnectionDetail(detail);
+        },
+      });
+      clientRef.current = client;
+
+      const hello = await client.connect({
+        gatewayUrl: secrets.gatewayUrl.trim(),
+        buildConnectParams: (challengePayload) => {
+          return buildGatewayOperatorConnectParams({
+            challengePayload,
+            identity: loadedIdentity.identity,
+            token: secrets.token.trim(),
+          });
+        },
+      });
+
+      if (isRecord(hello) && isRecord(hello.auth) && typeof hello.auth.deviceToken === "string") {
+        const nextIdentity = await persistDeviceToken(
+          store,
+          loadedIdentity.identity,
+          hello.auth.deviceToken,
+        );
+        setIdentity(nextIdentity);
+      }
+
+      const service = new ChatService(client, { eventSource: client });
+      chatServiceRef.current = service;
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = service.onChatEvent(onChatEvent, { sessionKey });
+
+      const history = await service.getHistory({ sessionKey, limit: 200 });
+      setMessages(mapHistoryMessages(history.messages));
+      setConnectionDetail("Connected");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to initialize chat");
+      setConnectionDetail("Connection unavailable");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [onChatEvent, sessionKey, store]);
+
+  const sendMessage = useCallback(async () => {
+    const service = chatServiceRef.current;
+    const messageText = draft.trim();
+    if (!service || !sessionKey || messageText.length === 0 || isSending) {
+      return;
+    }
+
+    setErrorMessage("");
+    setDraft("");
+    setMessages((current) => [
+      ...current,
+      {
+        id: `user-${Date.now()}`,
+        role: "user",
+        body: messageText,
+        time: formatTime(),
+      },
+    ]);
+
+    setIsSending(true);
+    try {
+      const ack = await service.send({
+        sessionKey,
+        message: messageText,
+      });
+
+      if (ack.status === "error") {
+        activeRunIdRef.current = null;
+        setIsStreaming(false);
+        setErrorMessage(ack.summary);
+        return;
+      }
+
+      activeRunIdRef.current = ack.runId;
+      setIsStreaming(true);
+    } catch (error) {
+      setIsStreaming(false);
+      setErrorMessage(error instanceof Error ? error.message : "Failed to send message");
+    } finally {
+      setIsSending(false);
+    }
+  }, [draft, isSending, sessionKey]);
+
+  const abortMessage = useCallback(async () => {
+    const service = chatServiceRef.current;
+    if (!service || !sessionKey) {
+      return;
+    }
+    try {
+      await service.abort({ sessionKey, runId: activeRunIdRef.current ?? undefined });
+      activeRunIdRef.current = null;
+      setIsStreaming(false);
+      setStreamingText("");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to abort run");
+    }
+  }, [sessionKey, setStreamingText]);
+
+  useEffect(() => {
+    void initialize();
+    return () => {
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
+      activeRunIdRef.current = null;
+      clientRef.current?.disconnect();
+      clientRef.current = null;
+      chatServiceRef.current = null;
+    };
+  }, [initialize]);
 
   if (!fontsLoaded) {
     return null;
@@ -60,61 +385,103 @@ export function ChatScreen() {
         </Pressable>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {sessionTitle}
+            {sessionLabel}
           </Text>
           <View style={styles.statusRow}>
             <View style={styles.onlineDot} />
-            <Text style={styles.statusText}>Online</Text>
+            <Text style={styles.statusText}>
+              {connectionDetail}
+              {identity ? ` • ${identity.deviceId.slice(0, 8)}...` : ""}
+            </Text>
           </View>
         </View>
-        <Pressable style={styles.headerIconButton}>
-          <Text style={styles.headerIcon}>⚙</Text>
+        <Pressable style={styles.headerIconButton} onPress={() => void initialize()}>
+          <Text style={styles.headerIcon}>↻</Text>
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.messagesContent} style={styles.messagesArea}>
-        {mockMessages.map((message) => {
-          const isAssistant = message.role === "assistant";
-          return (
-            <View
-              key={message.id}
-              style={[styles.messageRow, isAssistant ? styles.messageRowLeft : styles.messageRowRight]}
-            >
-              {isAssistant ? (
-                <View style={[styles.avatar, styles.avatarAssistant]}>
-                  <Text style={styles.avatarText}>{initialsForAuthor(message.author)}</Text>
+      {errorMessage ? (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorTitle}>Chat Error</Text>
+          <Text style={styles.errorBody}>{errorMessage}</Text>
+        </View>
+      ) : null}
+
+      {isLoading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator size="small" color="#3B82F6" />
+          <Text style={styles.centerStateTitle}>Loading chat history...</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.messagesContent} style={styles.messagesArea}>
+          {messages.length === 0 ? (
+            <View style={styles.emptyStateWrap}>
+              <Text style={styles.emptyStateTitle}>No messages yet</Text>
+              <Text style={styles.emptyStateBody}>Send your first message to start this session.</Text>
+            </View>
+          ) : null}
+
+          {messages.map((message) => {
+            const isAssistant = message.role === "assistant";
+            return (
+              <View
+                key={message.id}
+                style={[styles.messageRow, isAssistant ? styles.messageRowLeft : styles.messageRowRight]}
+              >
+                {isAssistant ? (
+                  <View style={[styles.avatar, styles.avatarAssistant]}>
+                    <Text style={styles.avatarText}>{initialsForRole(message.role)}</Text>
+                  </View>
+                ) : null}
+                <View
+                  style={[
+                    styles.messageColumn,
+                    isAssistant ? styles.messageColumnLeft : styles.messageColumnRight,
+                  ]}
+                >
+                  <View style={styles.metaRow}>
+                    {isAssistant ? <Text style={styles.metaAuthor}>OpenClaw</Text> : null}
+                    <Text style={styles.metaTime}>{message.time}</Text>
+                    {!isAssistant ? <Text style={styles.metaAuthor}>You</Text> : null}
+                  </View>
+                  <View style={[styles.bubble, isAssistant ? styles.assistantBubble : styles.userBubble]}>
+                    <Text
+                      style={[
+                        styles.bubbleText,
+                        isAssistant ? styles.assistantBubbleText : styles.userBubbleText,
+                      ]}
+                    >
+                      {message.body}
+                    </Text>
+                  </View>
                 </View>
-              ) : null}
-              <View style={[styles.messageColumn, isAssistant ? styles.messageColumnLeft : styles.messageColumnRight]}>
-                <View style={styles.metaRow}>
-                  {isAssistant ? <Text style={styles.metaAuthor}>{message.author}</Text> : null}
-                  <Text style={styles.metaTime}>{message.time}</Text>
-                  {!isAssistant ? <Text style={styles.metaAuthor}>{message.author}</Text> : null}
-                </View>
-                <View style={[styles.bubble, isAssistant ? styles.assistantBubble : styles.userBubble]}>
-                  <Text style={[styles.bubbleText, isAssistant ? styles.assistantBubbleText : styles.userBubbleText]}>
-                    {message.body}
-                  </Text>
-                </View>
-                {message.code ? (
-                  <View style={styles.codeCard}>
-                    <View style={styles.codeHeader}>
-                      <Text style={styles.codeFile}>{message.code.fileName}</Text>
-                      <Text style={styles.codeLanguage}>{message.code.language}</Text>
-                    </View>
-                    <Text style={styles.codeText}>{message.code.snippet}</Text>
+                {!isAssistant ? (
+                  <View style={[styles.avatar, styles.avatarUser]}>
+                    <Text style={styles.avatarText}>{initialsForRole(message.role)}</Text>
                   </View>
                 ) : null}
               </View>
-              {!isAssistant ? (
-                <View style={[styles.avatar, styles.avatarUser]}>
-                  <Text style={styles.avatarText}>{initialsForAuthor(message.author)}</Text>
+            );
+          })}
+
+          {streamText.trim().length > 0 ? (
+            <View style={[styles.messageRow, styles.messageRowLeft]}>
+              <View style={[styles.avatar, styles.avatarAssistant]}>
+                <Text style={styles.avatarText}>OC</Text>
+              </View>
+              <View style={[styles.messageColumn, styles.messageColumnLeft]}>
+                <View style={styles.metaRow}>
+                  <Text style={styles.metaAuthor}>OpenClaw</Text>
+                  <Text style={styles.metaTime}>typing...</Text>
                 </View>
-              ) : null}
+                <View style={[styles.bubble, styles.assistantBubble]}>
+                  <Text style={[styles.bubbleText, styles.assistantBubbleText]}>{streamText}</Text>
+                </View>
+              </View>
             </View>
-          );
-        })}
-      </ScrollView>
+          ) : null}
+        </ScrollView>
+      )}
 
       <View style={styles.footer}>
         <ScrollView
@@ -123,16 +490,13 @@ export function ChatScreen() {
           contentContainerStyle={styles.quickActionsWrap}
         >
           {quickActions.map((action) => (
-            <Pressable key={action.id} style={styles.quickAction}>
+            <Pressable key={action.id} style={styles.quickAction} onPress={() => setDraft(action.label)}>
               <Text style={styles.quickActionText}>{action.label}</Text>
             </Pressable>
           ))}
         </ScrollView>
 
         <View style={styles.inputWrap}>
-          <Pressable style={styles.inputIconButton}>
-            <Text style={styles.inputIcon}>＋</Text>
-          </Pressable>
           <TextInput
             value={draft}
             onChangeText={setDraft}
@@ -141,9 +505,19 @@ export function ChatScreen() {
             style={styles.textInput}
             multiline
           />
-          <Pressable style={styles.sendButton}>
-            <Text style={styles.sendButtonText}>↑</Text>
-          </Pressable>
+          {isStreaming ? (
+            <Pressable style={styles.abortButton} onPress={() => void abortMessage()}>
+              <Text style={styles.abortButtonText}>Stop</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.sendButton, draft.trim().length === 0 || isSending ? styles.sendButtonDisabled : null]}
+              onPress={() => void sendMessage()}
+              disabled={draft.trim().length === 0 || isSending}
+            >
+              <Text style={styles.sendButtonText}>{isSending ? "..." : "↑"}</Text>
+            </Pressable>
+          )}
         </View>
         <Text style={styles.disclaimer}>OpenClaw can make mistakes. Verify important info.</Text>
       </View>
@@ -206,9 +580,38 @@ const styles = StyleSheet.create({
   statusText: {
     color: "#A1A1AA",
     fontSize: 10,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
+    fontFamily: "SpaceGrotesk_400Regular",
+  },
+  errorCard: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#7F1D1D",
+    backgroundColor: "#2A1111",
+    padding: 10,
+  },
+  errorTitle: {
+    color: "#FCA5A5",
+    fontFamily: "SpaceGrotesk_700Bold",
+    fontSize: 12,
+  },
+  errorBody: {
+    marginTop: 2,
+    color: "#FECACA",
+    fontFamily: "SpaceGrotesk_400Regular",
+    fontSize: 12,
+  },
+  centerState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  centerStateTitle: {
+    color: "#E4E4E7",
     fontFamily: "SpaceGrotesk_500Medium",
+    fontSize: 14,
   },
   messagesArea: {
     flex: 1,
@@ -218,6 +621,24 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 140,
     gap: 22,
+  },
+  emptyStateWrap: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#3F3F46",
+    backgroundColor: "#18181B",
+    padding: 16,
+    gap: 4,
+  },
+  emptyStateTitle: {
+    color: "#FAFAFA",
+    fontFamily: "SpaceGrotesk_700Bold",
+    fontSize: 13,
+  },
+  emptyStateBody: {
+    color: "#A1A1AA",
+    fontFamily: "SpaceGrotesk_400Regular",
+    fontSize: 12,
   },
   messageRow: {
     flexDirection: "row",
@@ -303,43 +724,6 @@ const styles = StyleSheet.create({
   userBubbleText: {
     color: "#FFFFFF",
   },
-  codeCard: {
-    width: "100%",
-    borderRadius: 12,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#3F3F46",
-    backgroundColor: "#18181B",
-  },
-  codeHeader: {
-    backgroundColor: "#111114",
-    borderBottomWidth: 1,
-    borderBottomColor: "#27272A",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  codeFile: {
-    color: "#A1A1AA",
-    fontFamily: "SpaceGrotesk_500Medium",
-    fontSize: 11,
-  },
-  codeLanguage: {
-    color: "#71717A",
-    fontFamily: "SpaceGrotesk_500Medium",
-    fontSize: 10,
-    textTransform: "uppercase",
-  },
-  codeText: {
-    color: "#D4D4D8",
-    fontFamily: "Courier",
-    fontSize: 12,
-    lineHeight: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
   footer: {
     position: "absolute",
     left: 0,
@@ -381,19 +765,6 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 6,
   },
-  inputIconButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  inputIcon: {
-    color: "#A1A1AA",
-    fontSize: 20,
-    lineHeight: 24,
-    fontFamily: "SpaceGrotesk_500Medium",
-  },
   textInput: {
     flex: 1,
     maxHeight: 120,
@@ -402,6 +773,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     paddingVertical: 6,
+    paddingHorizontal: 8,
     fontFamily: "SpaceGrotesk_400Regular",
   },
   sendButton: {
@@ -412,10 +784,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  sendButtonDisabled: {
+    backgroundColor: "#1D4ED8",
+    opacity: 0.5,
+  },
   sendButtonText: {
     color: "#FFFFFF",
     fontSize: 16,
     lineHeight: 20,
+    fontFamily: "SpaceGrotesk_700Bold",
+  },
+  abortButton: {
+    borderRadius: 8,
+    minWidth: 44,
+    height: 34,
+    paddingHorizontal: 12,
+    backgroundColor: "#7F1D1D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  abortButtonText: {
+    color: "#FEE2E2",
+    fontSize: 12,
     fontFamily: "SpaceGrotesk_700Bold",
   },
   disclaimer: {
