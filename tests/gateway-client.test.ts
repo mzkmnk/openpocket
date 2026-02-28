@@ -60,6 +60,7 @@ afterEach(() => {
 });
 
 describe("GatewayClient", () => {
+  // 接続ハンドシェイク後に request/response が正しく動作すること
   it("connects with challenge handshake and supports request/response", async () => {
     const sockets: MockWebSocket[] = [];
     const logs: string[] = [];
@@ -103,6 +104,7 @@ describe("GatewayClient", () => {
     expect(logs.join("\n")).not.toContain("secret");
   });
 
+  // 指定イベント購読とワイルドカード購読の両方が動作すること
   it("routes named events and wildcard events", async () => {
     const sockets: MockWebSocket[] = [];
     const client = new GatewayClient({
@@ -143,6 +145,7 @@ describe("GatewayClient", () => {
     expect(onAll).toHaveBeenCalledTimes(3);
   });
 
+  // 想定外切断時にバックオフ付きで再接続できること
   it("reconnects with backoff after unexpected close", async () => {
     vi.useFakeTimers();
 
@@ -194,13 +197,15 @@ describe("GatewayClient", () => {
     const reconnectReq = parseLastReq(sockets[1]);
     sockets[1].emitResponse(reconnectReq.id, { protocol: 3 });
 
-    await vi.runAllTicks();
+    vi.runAllTicks();
+    await flushMicrotasks();
 
     expect(client.getStatus()).toBe("connected");
     expect(connectBuildCount).toBe(2);
     expect(statuses).toContain("reconnecting");
   });
 
+  // ハンドシェイク完了前に切断した場合、connect が失敗として返ること
   it("rejects in-flight connect when disconnected before handshake completion", async () => {
     const sockets: MockWebSocket[] = [];
     const client = new GatewayClient({
@@ -223,6 +228,7 @@ describe("GatewayClient", () => {
     expect(client.getStatus()).toBe("disconnected");
   });
 
+  // connect 応答が失敗した場合に自動再接続しないこと
   it("does not auto-reconnect on connect response failure", async () => {
     vi.useFakeTimers();
 
