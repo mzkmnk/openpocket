@@ -60,18 +60,21 @@ async function readStoredIdentity(): Promise<DeviceIdentity | null> {
       return null;
     }
 
-    const publicKeyBytes = base64UrlToBytes(parsed.publicKey);
-    const expectedDeviceId = deviceIdFromPublicKey(publicKeyBytes);
+    // Source of truth: privateKey seed32. Derive publicKey + deviceId from it.
+    const seed32 = base64UrlToBytes(parsed.privateKey);
+    const { publicKey: derivedPublicKey } = keyPairFromSeed(seed32);
+    const derivedPublicKeyB64Url = bytesToBase64Url(derivedPublicKey);
+    const derivedDeviceId = deviceIdFromPublicKey(derivedPublicKey);
 
     const identity: DeviceIdentity = {
-      deviceId: expectedDeviceId,
-      publicKey: parsed.publicKey,
+      deviceId: derivedDeviceId,
+      publicKey: derivedPublicKeyB64Url,
       privateKey: parsed.privateKey,
       deviceToken: typeof parsed.deviceToken === "string" ? parsed.deviceToken : undefined,
     };
 
-    // If stored deviceId differs (older algorithm), self-heal by overwriting.
-    if (parsed.deviceId !== expectedDeviceId) {
+    // Self-heal any mismatch (older algorithms / mixed key formats).
+    if (parsed.deviceId !== derivedDeviceId || parsed.publicKey !== derivedPublicKeyB64Url) {
       await saveIdentity(identity);
     }
 
