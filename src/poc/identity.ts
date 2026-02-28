@@ -4,7 +4,7 @@ import * as SecureStore from "expo-secure-store";
 
 import { bytesToBase64, utf8ToBase64 } from "./base64";
 import type { DeviceIdentity } from "./types";
-import { makeId, nowIso } from "./utils";
+import { makeId } from "./utils";
 
 const STORAGE_KEY = "openpocket.poc.device.identity";
 
@@ -103,9 +103,9 @@ export async function persistDeviceToken(identity: DeviceIdentity, deviceToken: 
   return next;
 }
 
-export async function makeSignature(identity: DeviceIdentity, nonce: string): Promise<{ signature: string; signedAt: string }> {
+export async function makeSignature(identity: DeviceIdentity, nonce: string): Promise<{ signature: string; signedAt: number }> {
   const g = globalThis as any;
-  const signedAt = nowIso();
+  const signedAt = Date.now();
   const payload = `${identity.deviceId}:${nonce}:${signedAt}`;
 
   if (identity.privateKey.startsWith("jwk:") && g.crypto?.subtle) {
