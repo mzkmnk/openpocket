@@ -20,6 +20,8 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 import { GatewayClient } from "../../core/gateway/GatewayClient";
 import { loadGatewayConnectionSecrets } from "../../core/security/connectionSecrets";
@@ -32,8 +34,10 @@ import { buildGatewayOperatorConnectParams } from "../../core/security/deviceAut
 import type { SecureStoreAdapter } from "../../core/security/secureStore";
 import { SessionsService } from "../../core/sessions/SessionsService";
 import type { SessionListItem } from "../../core/sessions/types";
+import type { RootStackParamList } from "../../router/types";
 
 type SessionsTab = "all" | "pinned" | "recent";
+type SessionsNavigationProp = NativeStackNavigationProp<RootStackParamList, "internal/sessions">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -107,6 +111,7 @@ function colorForSession(key: string): { bg: string; fg: string } {
 }
 
 export function SessionsScreen() {
+  const navigation = useNavigation<SessionsNavigationProp>();
   const [fontsLoaded] = useFonts({
     SpaceGrotesk_400Regular,
     SpaceGrotesk_500Medium,
@@ -377,7 +382,16 @@ export function SessionsScreen() {
             const isActive = activeSessionKey === item.key;
             return (
               <View style={[styles.itemWrap, isActive ? styles.itemWrapActive : null]}>
-                <Pressable style={styles.itemMain} onPress={() => setActiveSessionKey(item.key)}>
+                <Pressable
+                  style={styles.itemMain}
+                  onPress={() => {
+                    setActiveSessionKey(item.key);
+                    navigation.navigate("internal/chat", {
+                      sessionKey: item.key,
+                      sessionLabel: item.label,
+                    });
+                  }}
+                >
                   <View style={[styles.itemAvatar, { backgroundColor: avatarColor.bg }]}>
                     <Text style={[styles.itemAvatarText, { color: avatarColor.fg }]}>◉</Text>
                   </View>
