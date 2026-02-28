@@ -54,21 +54,9 @@ async function authenticateOnLaunch(): Promise<void> {
     return;
   }
 
-  if (Platform.OS === "ios") {
-    const supportedTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
-    const supportsFaceId = supportedTypes.includes(
-      LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION,
-    );
-    if (!supportsFaceId) {
-      throw new Error("Face ID is required. Please enable Face ID in iOS Settings.");
-    }
-  }
-
   const result = await LocalAuthentication.authenticateAsync({
     promptMessage: "Authenticate to open OpenPocket",
     cancelLabel: "Cancel",
-    disableDeviceFallback: true,
-    fallbackLabel: "",
   });
 
   if (!result.success) {
