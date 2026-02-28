@@ -20,6 +20,33 @@ type PendingRequest = {
 };
 
 /**
+ * Extends Error with a Gateway error code for UI classification.
+ * UI 分類のために Gateway エラーコードを保持する Error 拡張です。
+ */
+class GatewayRequestError extends Error {
+  /**
+   * Stable Gateway error code.
+   * Gateway の安定したエラーコードです。
+   */
+  readonly code?: string;
+
+  /**
+   * Creates a Gateway request error.
+   * Gateway リクエストエラーを生成します。
+   *
+   * @param code - Gateway error code.
+   *               Gateway エラーコード。
+   * @param message - Human-readable error message.
+   *                  人が読めるエラーメッセージ。
+   */
+  constructor(code: string | undefined, message: string) {
+    super(message);
+    this.name = code ?? "GatewayRequestError";
+    this.code = code;
+  }
+}
+
+/**
  * Handles a single Gateway event notification.
  * Gateway のイベント通知 1 件を処理するリスナーです。
  *
@@ -393,11 +420,14 @@ export class GatewayClient {
       return;
     }
 
-    const message =
-      typeof packet.error === "string"
-        ? packet.error
-        : (packet.error?.message ?? packet.error?.code ?? "Gateway request failed");
-    pending.reject(new Error(message));
+    if (typeof packet.error === "string") {
+      pending.reject(new GatewayRequestError(undefined, packet.error));
+      return;
+    }
+
+    const code = packet.error?.code;
+    const message = packet.error?.message ?? code ?? "Gateway request failed";
+    pending.reject(new GatewayRequestError(code, message));
   }
 
   /**
