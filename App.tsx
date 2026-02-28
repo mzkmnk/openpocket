@@ -303,7 +303,43 @@ export default function App() {
               setIdentity(identityData);
 
               const signed = await makeSignature(identityData, nonce);
-              const hello = await call("connect", {
+              const connectParams = {
+                minProtocol: 3,
+                maxProtocol: 3,
+                role: "operator",
+                scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
+                // Some gateway schema branches treat these as required (even for operators).
+                caps: [],
+                commands: [],
+                permissions: {},
+                locale: "ja-JP",
+                userAgent: "openpocket/0.0.1",
+                client: {
+                  id: "cli",
+                  version: "openpocket/0.0.1",
+                  // NOTE: Gateway protocol validation currently expects
+                  // operator clients to use a desktop-like platform string.
+                  // For PoC we pin to "macos" to satisfy the schema.
+                  platform: "macos",
+                  mode: "operator",
+                },
+                auth: {
+                  token: nextToken || undefined,
+                  password: nextPassword || undefined,
+                  deviceToken: identityData.deviceToken,
+                },
+                device: {
+                  id: identityData.deviceId,
+                  publicKey: identityData.publicKey,
+                  nonce,
+                  signedAt: signed.signedAt,
+                  signature: signed.signature,
+                },
+              };
+
+              appendLog(`connect params: ${JSON.stringify(connectParams)}`);
+
+              const hello = await call("connect", connectParams);
                 minProtocol: 3,
                 maxProtocol: 3,
                 role: "operator",
