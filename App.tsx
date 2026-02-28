@@ -309,11 +309,10 @@ export default function App() {
                 role: "operator",
                 scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
                 client: {
-                  id: "openpocket-poc",
-                  version: "0.1.0",
+                  id: "cli",
+                  version: "openpocket/0.0.1",
                   platform: Platform.OS,
-                  mode: "mobile",
-                  instanceId: makeId("instance"),
+                  mode: "operator",
                 },
                 auth: {
                   token: nextToken || undefined,
