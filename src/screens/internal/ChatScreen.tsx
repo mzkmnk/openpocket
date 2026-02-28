@@ -165,6 +165,7 @@ export function ChatScreen() {
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const streamTextRef = useRef("");
+  const messagesScrollRef = useRef<ScrollView | null>(null);
 
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -175,6 +176,12 @@ export function ChatScreen() {
   const [errorMessage, setErrorMessage] = useState("");
   const [connectionDetail, setConnectionDetail] = useState("Connecting to gateway...");
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
+
+  const scrollToBottom = useCallback((animated: boolean) => {
+    requestAnimationFrame(() => {
+      messagesScrollRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
 
   const setStreamingText = useCallback((next: string) => {
     streamTextRef.current = next;
@@ -208,6 +215,7 @@ export function ChatScreen() {
         if (delta.length > 0) {
           setStreamingText(delta);
           setIsStreaming(true);
+          scrollToBottom(true);
         }
         return;
       }
@@ -218,6 +226,7 @@ export function ChatScreen() {
         activeRunIdRef.current = null;
         setStreamingText("");
         setIsStreaming(false);
+        scrollToBottom(true);
         return;
       }
 
@@ -227,6 +236,7 @@ export function ChatScreen() {
         activeRunIdRef.current = null;
         setStreamingText("");
         setIsStreaming(false);
+        scrollToBottom(true);
         return;
       }
 
@@ -237,7 +247,7 @@ export function ChatScreen() {
         setErrorMessage(payload.errorMessage ?? "Chat stream failed");
       }
     },
-    [appendAssistantMessage, setStreamingText],
+    [appendAssistantMessage, scrollToBottom, setStreamingText],
   );
 
   const initialize = useCallback(async () => {
@@ -294,6 +304,7 @@ export function ChatScreen() {
 
       const history = await service.getHistory({ sessionKey, limit: 200 });
       setMessages(mapHistoryMessages(history.messages));
+      scrollToBottom(false);
       setConnectionDetail("Connected");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to initialize chat");
@@ -301,7 +312,7 @@ export function ChatScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [onChatEvent, sessionKey, store]);
+  }, [onChatEvent, scrollToBottom, sessionKey, store]);
 
   const sendMessage = useCallback(async () => {
     const service = chatServiceRef.current;
@@ -321,6 +332,7 @@ export function ChatScreen() {
         time: formatTime(),
       },
     ]);
+    scrollToBottom(true);
 
     setIsSending(true);
     try {
@@ -344,7 +356,7 @@ export function ChatScreen() {
     } finally {
       setIsSending(false);
     }
-  }, [draft, isSending, sessionKey]);
+  }, [draft, isSending, scrollToBottom, sessionKey]);
 
   const abortMessage = useCallback(async () => {
     const service = chatServiceRef.current;
@@ -413,7 +425,12 @@ export function ChatScreen() {
           <Text style={styles.centerStateTitle}>Loading chat history...</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.messagesContent} style={styles.messagesArea}>
+        <ScrollView
+          ref={messagesScrollRef}
+          contentContainerStyle={styles.messagesContent}
+          style={styles.messagesArea}
+          onContentSizeChange={() => scrollToBottom(false)}
+        >
           {messages.length === 0 ? (
             <View style={styles.emptyStateWrap}>
               <Text style={styles.emptyStateTitle}>No messages yet</Text>
