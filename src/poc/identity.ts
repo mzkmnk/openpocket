@@ -135,7 +135,7 @@ function signaturePayloadV2(args: {
   token: string;
   nonce: string;
 }): string {
-  const scopesCsv = [...args.scopes].sort().join(",");
+  const scopesCsv = args.scopes.join(",");
   return [
     "v2",
     args.deviceId,
