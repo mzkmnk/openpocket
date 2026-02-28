@@ -157,13 +157,14 @@ function signaturePayloadV2(args: {
   token: string;
   nonce: string;
 }): string {
+  const scopesCsv = [...args.scopes].sort().join(",");
   return [
     "v2",
     args.deviceId,
     args.clientId,
     args.clientMode,
     args.role,
-    args.scopes.join(","),
+    scopesCsv,
     String(args.signedAtMs),
     args.token,
     args.nonce,

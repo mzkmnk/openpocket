@@ -306,20 +306,25 @@ export default function App() {
               // the token actually sent in `auth.token`.
               // Prefer deviceToken once issued (like Control UI), otherwise fall back to gateway token.
               const tokenForAuth = identityData.deviceToken || nextToken || undefined;
+              const scopes = ["operator.admin", "operator.approvals", "operator.pairing"];
+
+              // Match Control UI identifiers to satisfy signature verification.
+              const clientId = "openclaw-control-ui";
+              const clientMode = "webchat";
 
               const signed = await makeSignature(identityData, {
                 nonce,
-                clientId: "cli",
-                clientMode: "cli",
+                clientId,
+                clientMode,
                 role: "operator",
-                scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
-                token: tokenForAuth,
+                scopes,
+                token: tokenForAuth ?? "",
               });
               const connectParams = {
                 minProtocol: 3,
                 maxProtocol: 3,
                 role: "operator",
-                scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
+                scopes,
                 // Some gateway schema branches treat these as required (even for operators).
                 caps: [],
                 commands: [],
@@ -327,15 +332,14 @@ export default function App() {
                 locale: "ja-JP",
                 userAgent: "openpocket/0.0.1",
                 client: {
-                  id: "cli",
+                  id: clientId,
                   version: "openpocket/0.0.1",
                   // NOTE: Gateway protocol validation currently expects
                   // operator clients to use a desktop-like platform string.
                   // For PoC we pin to "macos" to satisfy the schema.
                   platform: "macos",
                   // client.mode must be a gateway-known client mode (not the role).
-                  // Use "cli" for now (matches built-in CLI client mode).
-                  mode: "cli",
+                  mode: clientMode,
                 },
                 auth: {
                   token: tokenForAuth,
@@ -351,8 +355,9 @@ export default function App() {
               };
 
               appendLog(
-                `connect params: role=[${connectParams.role}] client.id=[${connectParams.client.id}] client.mode=[${connectParams.client.mode}] platform=[${connectParams.client.platform}]`,
+                `connect params: role=[${connectParams.role}] client.id=[${connectParams.client.id}] client.mode=[${connectParams.client.mode}] platform=[${connectParams.client.platform}] scopes=[${scopes.join(",")}]`,
               );
+              appendLog(`signature payload v2 fields: clientId=[${clientId}] clientMode=[${clientMode}] tokenLen=[${(tokenForAuth ?? "").length}]`);
               appendLog(`connect params json:\n${JSON.stringify(connectParams, null, 2)}`);
 
               const hello = await call("connect", connectParams);
