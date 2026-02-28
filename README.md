@@ -1,24 +1,42 @@
 # openpocket
 
-OpenClaw を **Tailnet（Tailscale）接続された端末のみ** から安全に利用するための、モバイル向けクライアントアプリ。
+A mobile client for OpenClaw, designed for secure access from **Tailnet (Tailscale)-connected devices only**.
 
-- Tech: React Native (Expo) + TypeScript
-- Network: Tailscale (tailnet only)
-- Target: OpenClaw Gateway (WebSocket protocol)
+## Languages
 
-## Goals
+- English: This file
+- Japanese: [README.ja.md](README.ja.md)
 
-- Discord の代替として、モバイルで使いやすい **OpenClaw 専用 UI** を提供する
-- OpenClaw の **session を複数切り替え**できる「本格クライアント」
-- Tailnet 内の許可端末のみがアクセスできる（ペアリング/トークン/鍵を前提）
+## Overview
 
-## Non-Goals
+openpocket provides a dedicated mobile UI for operating OpenClaw without relying on chat platforms.
+The app connects to OpenClaw Gateway over WebSocket and focuses on session-based workflows.
 
-- Discord 相当の巨大な機能セット（権限管理、サーバ運用、ボットエコシステム等）は追わない
+## Features
 
-## Docs
+- Tailnet-only access model (Tailscale network boundary)
+- Token-based connection with persisted secure credentials
+- Device identity generation and challenge-response authentication
+- Device token persistence after successful pairing
+- Optional biometric authentication on app launch (mobile)
+- Auto-login gate using stored credentials and identity
+- Connection state visibility (connecting / connected / reconnecting / error)
+- Session list with search, pin/unpin, and recent/pinned filtering
+- Session label editing from the app UI
+- Chat history loading per session
+- Real-time chat streaming (`delta` / `final` / `aborted` / `error`)
+- Send and abort controls for in-flight chat runs
+- Automatic reconnect support in the Gateway client
 
-- 仕様書: [docs/spec.md](docs/spec.md)
+## Status
+
+- Core functionality is mostly implemented and usable.
+- Ongoing work is focused on polish, stability, and UX improvements.
+
+## Development
+
+- Tech stack: React Native (Expo) + TypeScript
+- Target backend: OpenClaw Gateway (WebSocket protocol)
 
 ## License
 
