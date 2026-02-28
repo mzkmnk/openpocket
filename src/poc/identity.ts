@@ -4,45 +4,23 @@ import * as SecureStore from "expo-secure-store";
 
 import * as ed25519 from "@noble/ed25519";
 import { sha256 as sha256Hex } from "js-sha256";
+import { sha512 } from "@noble/hashes/sha2.js";
 
 import { base64UrlToBytes, bytesToBase64Url } from "./base64";
 import type { DeviceIdentity } from "./types";
 
 const STORAGE_KEY = "openpocket.poc.device.identity";
 
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.trim().toLowerCase();
-  if (clean.length % 2 !== 0) {
-    throw new Error("Invalid hex");
-  }
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i += 1) {
-    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
-
 function deviceIdFromPublicKey(publicKey: Uint8Array): string {
   // Control UI: sha256(publicKeyBytes) -> hex
   return sha256Hex(publicKey);
 }
 
-// noble-ed25519 uses WebCrypto for SHA-512 by default. React Native does not.
-// Override to use expo-crypto so Ed25519 works on native.
-(ed25519.hashes as any).sha512Async = async (message: Uint8Array) => {
-  const hex = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA512,
-    bytesToHex(message),
-    { encoding: Crypto.CryptoEncoding.HEX },
-  );
-  return hexToBytes(hex);
-};
+// noble-ed25519 uses WebCrypto for SHA-512 by default.
+// On React Native, `crypto.subtle` is usually unavailable, so we provide
+// a pure-JS SHA-512 implementation.
+(ed25519.hashes as any).sha512 = sha512;
+(ed25519.hashes as any).sha512Async = async (message: Uint8Array) => sha512(message);
 
 async function readStoredIdentity(): Promise<DeviceIdentity | null> {
   const g = globalThis as any;
