@@ -302,7 +302,14 @@ export default function App() {
               const identityData = await getOrCreateIdentity();
               setIdentity(identityData);
 
-              const signed = await makeSignature(identityData, nonce);
+              const signed = await makeSignature(identityData, {
+                nonce,
+                clientId: "cli",
+                clientMode: "cli",
+                role: "operator",
+                scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
+                token: nextToken || undefined,
+              });
               const connectParams = {
                 minProtocol: 3,
                 maxProtocol: 3,

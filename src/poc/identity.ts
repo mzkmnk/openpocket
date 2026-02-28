@@ -2,11 +2,19 @@ import { Platform } from "react-native";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 
-import { bytesToBase64, utf8ToBase64 } from "./base64";
+import * as ed25519 from "@noble/ed25519";
+import { sha256 } from "@noble/hashes/sha2.js";
+
+import { base64UrlToBytes, bytesToBase64Url } from "./base64";
 import type { DeviceIdentity } from "./types";
-import { makeId } from "./utils";
 
 const STORAGE_KEY = "openpocket.poc.device.identity";
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 async function readStoredIdentity(): Promise<DeviceIdentity | null> {
   const g = globalThis as any;
@@ -26,6 +34,14 @@ async function readStoredIdentity(): Promise<DeviceIdentity | null> {
       typeof parsed.publicKey !== "string" ||
       typeof parsed.privateKey !== "string"
     ) {
+      return null;
+    }
+
+    // Reject legacy formats (raw:/jwk:) to avoid device identity mismatch.
+    if (parsed.publicKey.startsWith("raw:") || parsed.publicKey.startsWith("jwk:")) {
+      return null;
+    }
+    if (parsed.privateKey.startsWith("raw:") || parsed.privateKey.startsWith("jwk:")) {
       return null;
     }
 
@@ -63,36 +79,25 @@ function randomBytes(length: number): Uint8Array {
 }
 
 export async function getOrCreateIdentity(): Promise<DeviceIdentity> {
-  const g = globalThis as any;
   const existing = await readStoredIdentity();
   if (existing) {
     return existing;
   }
 
-  if (g.crypto?.subtle) {
-    try {
-      const pair = await g.crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
-      const publicJwk = await g.crypto.subtle.exportKey("jwk", pair.publicKey);
-      const privateJwk = await g.crypto.subtle.exportKey("jwk", pair.privateKey);
-
-      const identity: DeviceIdentity = {
-        deviceId: makeId("device"),
-        publicKey: `jwk:${JSON.stringify(publicJwk)}`,
-        privateKey: `jwk:${JSON.stringify(privateJwk)}`,
-      };
-
-      await saveIdentity(identity);
-      return identity;
-    } catch {
-      // fall through
-    }
-  }
+  // Align with Control UI device identity:
+  // - privateKey: base64url(32-byte secret)
+  // - publicKey: base64url(32-byte public)
+  // - deviceId: sha256(publicKeyBytes) as hex
+  const secretKey = randomBytes(32);
+  const publicKey = await ed25519.getPublicKeyAsync(secretKey);
+  const deviceId = bytesToHex(sha256(publicKey));
 
   const identity: DeviceIdentity = {
-    deviceId: makeId("device"),
-    publicKey: `raw:${bytesToBase64(randomBytes(32))}`,
-    privateKey: `raw:${bytesToBase64(randomBytes(64))}`,
+    deviceId,
+    publicKey: bytesToBase64Url(publicKey),
+    privateKey: bytesToBase64Url(secretKey),
   };
+
   await saveIdentity(identity);
   return identity;
 }
@@ -103,27 +108,58 @@ export async function persistDeviceToken(identity: DeviceIdentity, deviceToken: 
   return next;
 }
 
-export async function makeSignature(identity: DeviceIdentity, nonce: string): Promise<{ signature: string; signedAt: number }> {
-  const g = globalThis as any;
-  const signedAt = Date.now();
-  const payload = `${identity.deviceId}:${nonce}:${signedAt}`;
+function signaturePayloadV2(args: {
+  deviceId: string;
+  clientId: string;
+  clientMode: string;
+  role: string;
+  scopes: string[];
+  signedAtMs: number;
+  token: string;
+  nonce: string;
+}): string {
+  return [
+    "v2",
+    args.deviceId,
+    args.clientId,
+    args.clientMode,
+    args.role,
+    args.scopes.join(","),
+    String(args.signedAtMs),
+    args.token,
+    args.nonce,
+  ].join("|");
+}
 
-  if (identity.privateKey.startsWith("jwk:") && g.crypto?.subtle) {
-    try {
-      const jwk = JSON.parse(identity.privateKey.slice(4));
-      const key = await g.crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, false, ["sign"]);
-      const signed = await g.crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(payload));
-      return {
-        signature: bytesToBase64(new Uint8Array(signed)),
-        signedAt,
-      };
-    } catch {
-      // fall through
-    }
-  }
+export async function makeSignature(
+  identity: DeviceIdentity,
+  args: {
+    nonce: string;
+    clientId: string;
+    clientMode: string;
+    role: string;
+    scopes: string[];
+    token?: string;
+  },
+): Promise<{ signature: string; signedAt: number }> {
+  const signedAt = Date.now();
+  const payload = signaturePayloadV2({
+    deviceId: identity.deviceId,
+    clientId: args.clientId,
+    clientMode: args.clientMode,
+    role: args.role,
+    scopes: args.scopes,
+    signedAtMs: signedAt,
+    token: args.token ?? "",
+    nonce: args.nonce,
+  });
+
+  const secretKey = base64UrlToBytes(identity.privateKey);
+  const msg = new TextEncoder().encode(payload);
+  const sig = await ed25519.signAsync(msg, secretKey);
 
   return {
-    signature: utf8ToBase64(payload),
+    signature: bytesToBase64Url(sig),
     signedAt,
   };
 }
