@@ -331,11 +331,10 @@ export default function App() {
 
               // Self-check: verify signature locally before sending to gateway.
               try {
-                const msg = new TextEncoder().encode(signed.payload);
-                const sigBytes = base64UrlToBytes(signed.signature);
-                const pubBytes = base64UrlToBytes(identityData.publicKey);
-                const ok = await (await import("@noble/ed25519")).verifyAsync(sigBytes, msg, pubBytes);
                 const maskedPayload = signed.payload.replace(tokenForAuth, `<token:${tokenForAuth.length}>`);
+                const ok = await (await import("./src/poc/identity")).verifySignature(identityData, signed.payload, signed.signature);
+                const pubBytes = base64UrlToBytes(identityData.publicKey);
+                const sigBytes = base64UrlToBytes(signed.signature);
                 appendLog(`device-auth self-check verify=${ok} pubLen=${pubBytes.length} sigLen=${sigBytes.length}`);
                 appendLog(`device-auth payload(v2 masked): ${maskedPayload}`);
               } catch (e) {

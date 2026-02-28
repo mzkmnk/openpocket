@@ -19,8 +19,20 @@ function deviceIdFromPublicKey(publicKey: Uint8Array): string {
 // noble-ed25519 uses WebCrypto for SHA-512 by default.
 // On React Native, `crypto.subtle` is usually unavailable, so we provide
 // a pure-JS SHA-512 implementation.
+// IMPORTANT: do this in this module so all sign/verify calls share the same configured instance.
 (ed25519.hashes as any).sha512 = sha512;
 (ed25519.hashes as any).sha512Async = async (message: Uint8Array) => sha512(message);
+
+export async function verifySignature(
+  identity: DeviceIdentity,
+  payload: string,
+  signatureB64Url: string,
+): Promise<boolean> {
+  const msg = new TextEncoder().encode(payload);
+  const sigBytes = base64UrlToBytes(signatureB64Url);
+  const pubBytes = base64UrlToBytes(identity.publicKey);
+  return await ed25519.verifyAsync(sigBytes, msg, pubBytes);
+}
 
 async function readStoredIdentity(): Promise<DeviceIdentity | null> {
   const g = globalThis as any;
