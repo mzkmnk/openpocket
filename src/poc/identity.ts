@@ -2,9 +2,8 @@ import { Platform } from "react-native";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 
-import * as ed25519 from "@noble/ed25519";
+import nacl from "tweetnacl";
 import { sha256 as sha256Hex } from "js-sha256";
-import { sha512 } from "@noble/hashes/sha2.js";
 
 import { base64UrlToBytes, bytesToBase64Url } from "./base64";
 import type { DeviceIdentity } from "./types";
@@ -12,16 +11,14 @@ import type { DeviceIdentity } from "./types";
 const STORAGE_KEY = "openpocket.poc.device.identity";
 
 function deviceIdFromPublicKey(publicKey: Uint8Array): string {
-  // Control UI: sha256(publicKeyBytes) -> hex
+  // Gateway: sha256(publicKeyRawBytes) -> hex
   return sha256Hex(publicKey);
 }
 
-// noble-ed25519 uses WebCrypto for SHA-512 by default.
-// On React Native, `crypto.subtle` is usually unavailable, so we provide
-// a pure-JS SHA-512 implementation.
-// IMPORTANT: do this in this module so all sign/verify calls share the same configured instance.
-(ed25519.hashes as any).sha512 = sha512;
-(ed25519.hashes as any).sha512Async = async (message: Uint8Array) => sha512(message);
+function keyPairFromSeed(seed32: Uint8Array): { publicKey: Uint8Array; secretKey: Uint8Array } {
+  const kp = nacl.sign.keyPair.fromSeed(seed32);
+  return { publicKey: kp.publicKey, secretKey: kp.secretKey };
+}
 
 export async function verifySignature(
   identity: DeviceIdentity,
@@ -31,7 +28,7 @@ export async function verifySignature(
   const msg = new TextEncoder().encode(payload);
   const sigBytes = base64UrlToBytes(signatureB64Url);
   const pubBytes = base64UrlToBytes(identity.publicKey);
-  return await ed25519.verifyAsync(sigBytes, msg, pubBytes);
+  return nacl.sign.detached.verify(msg, sigBytes, pubBytes);
 }
 
 async function readStoredIdentity(): Promise<DeviceIdentity | null> {
@@ -116,15 +113,15 @@ export async function getOrCreateIdentity(): Promise<DeviceIdentity> {
   // - privateKey: base64url(32-byte secret)
   // - publicKey: base64url(32-byte public)
   // - deviceId: sha256(publicKeyBytes) as hex
-  const secretKey = randomBytes(32);
-  const publicKey = await ed25519.getPublicKeyAsync(secretKey);
+  const seed32 = randomBytes(32);
+  const { publicKey } = keyPairFromSeed(seed32);
 
   const deviceId = deviceIdFromPublicKey(publicKey);
 
   const identity: DeviceIdentity = {
     deviceId,
     publicKey: bytesToBase64Url(publicKey),
-    privateKey: bytesToBase64Url(secretKey),
+    privateKey: bytesToBase64Url(seed32),
   };
 
   await saveIdentity(identity);
@@ -194,19 +191,19 @@ export async function makeSignature(
     nonce: args.nonce,
   });
 
-  const secretKey = base64UrlToBytes(identity.privateKey);
+  const seed32 = base64UrlToBytes(identity.privateKey);
+  const { publicKey, secretKey } = keyPairFromSeed(seed32);
   const msg = new TextEncoder().encode(payload);
-  const sig = await ed25519.signAsync(msg, secretKey);
+  const sig = nacl.sign.detached(msg, secretKey);
 
   // Debug: verify without base64 encoding to isolate failures.
   let debug: { verifyRaw: boolean; pubLen: number; sigLen: number; sigRoundtripOk: boolean } | undefined;
   try {
-    const pubBytes = base64UrlToBytes(identity.publicKey);
-    const verifyRaw = await ed25519.verifyAsync(sig, msg, pubBytes);
+    const verifyRaw = nacl.sign.detached.verify(msg, sig, publicKey);
     const sigB64 = bytesToBase64Url(sig);
     const sigRoundtrip = base64UrlToBytes(sigB64);
     const sigRoundtripOk = sigRoundtrip.length === sig.length && sigRoundtrip.every((b, i) => b === sig[i]);
-    debug = { verifyRaw, pubLen: pubBytes.length, sigLen: sig.length, sigRoundtripOk };
+    debug = { verifyRaw, pubLen: publicKey.length, sigLen: sig.length, sigRoundtripOk };
   } catch {
     // ignore
   }
