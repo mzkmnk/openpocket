@@ -308,6 +308,12 @@ export default function App() {
                 maxProtocol: 3,
                 role: "operator",
                 scopes: ["operator.admin", "operator.approvals", "operator.pairing"],
+                // Some gateway schema branches treat these as required (even for operators).
+                caps: [],
+                commands: [],
+                permissions: {},
+                locale: "ja-JP",
+                userAgent: "openpocket/0.0.1",
                 client: {
                   id: "cli",
                   version: "openpocket/0.0.1",
@@ -315,7 +321,7 @@ export default function App() {
                   // operator clients to use a desktop-like platform string.
                   // For PoC we pin to "macos" to satisfy the schema.
                   platform: "macos",
-                  mode: "operator", 
+                  mode: "operator",
                 },
                 auth: {
                   token: nextToken || undefined,
