@@ -1,5 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
@@ -47,6 +48,9 @@ function createStoreAdapter(): SecureStoreAdapter {
 
 async function authenticateOnLaunch(): Promise<void> {
   if (Platform.OS === "web") {
+    return;
+  }
+  if (Constants.appOwnership === "expo") {
     return;
   }
 
