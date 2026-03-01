@@ -39,12 +39,10 @@ export function InternalFooterNav({ state, navigation, insets }: BottomTabBarPro
             accessibilityRole="button"
             accessibilityState={{ selected: isActive }}
           >
-            <MaterialIcons
-              name={item.icon}
-              size={20}
-              color={isActive ? "#137FEC" : "#64748B"}
-            />
-            <Text style={[styles.tabLabel, isActive ? styles.tabLabelActive : null]}>{item.label}</Text>
+            <MaterialIcons name={item.icon} size={20} color={isActive ? "#137FEC" : "#64748B"} />
+            <Text style={[styles.tabLabel, isActive ? styles.tabLabelActive : null]}>
+              {item.label}
+            </Text>
           </Pressable>
         );
       })}
