@@ -37,7 +37,10 @@ import type { SecureStoreAdapter } from "../../core/security/secureStore";
 import { SessionsService } from "../../core/sessions/SessionsService";
 import type { RootStackParamList } from "../../router/types";
 
-type SessionCreateNavigationProp = NativeStackNavigationProp<RootStackParamList, "internal/session-create">;
+type SessionCreateNavigationProp = NativeStackNavigationProp<
+  RootStackParamList,
+  "internal/session-create"
+>;
 
 type GatewayFeatureFlags = {
   canListAgents: boolean;
@@ -182,7 +185,9 @@ export function SessionCreateScreen() {
 
       setConnectionDetail("Connected");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to initialize create screen");
+      setErrorMessage(
+        error instanceof Error ? error.message : "Failed to initialize create screen",
+      );
       setConnectionDetail("Connection unavailable");
     } finally {
       setIsLoading(false);
@@ -261,7 +266,10 @@ export function SessionCreateScreen() {
         </Pressable>
         <Text style={styles.headerTitle}>New Session</Text>
         <Pressable
-          style={[styles.headerIconButton, isLoading || isCreating ? styles.headerIconDisabled : null]}
+          style={[
+            styles.headerIconButton,
+            isLoading || isCreating ? styles.headerIconDisabled : null,
+          ]}
           onPress={() => void onCreate()}
           disabled={isLoading || isCreating}
         >

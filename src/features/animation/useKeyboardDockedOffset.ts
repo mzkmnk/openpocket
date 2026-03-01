@@ -24,7 +24,8 @@ export function useKeyboardDockedOffset(options: UseKeyboardDockedOffsetOptions 
   const applyOffset = useCallback(
     (next: number, durationMs?: number) => {
       const normalized = Math.max(0, next);
-      const duration = typeof durationMs === "number" ? Math.max(80, durationMs) : defaultDurationMs;
+      const duration =
+        typeof durationMs === "number" ? Math.max(80, durationMs) : defaultDurationMs;
       setKeyboardOffset(normalized);
       Animated.timing(keyboardOffsetAnimated, {
         toValue: normalized,

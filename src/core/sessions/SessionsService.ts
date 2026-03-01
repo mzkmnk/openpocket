@@ -117,7 +117,10 @@ export class SessionsService {
       const localLabel = localLabels[row.key];
       return {
         key: row.key,
-        label: typeof localLabel === "string" && localLabel.trim().length > 0 ? localLabel : buildDisplayLabel(row),
+        label:
+          typeof localLabel === "string" && localLabel.trim().length > 0
+            ? localLabel
+            : buildDisplayLabel(row),
         preview: buildPreview(row),
         updatedAt,
         pinned: pinnedKeys.has(row.key),
@@ -277,7 +280,8 @@ export class SessionsService {
         return {};
       }
       const entries = Object.entries(parsed).filter(
-        (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+        (entry): entry is [string, string] =>
+          typeof entry[0] === "string" && typeof entry[1] === "string",
       );
       return Object.fromEntries(entries);
     } catch {
