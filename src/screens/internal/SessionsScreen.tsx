@@ -8,6 +8,7 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import {
   ActivityIndicator,
   FlatList,
@@ -127,6 +128,7 @@ export function SessionsScreen() {
     SpaceGrotesk_400Regular,
     SpaceGrotesk_500Medium,
     SpaceGrotesk_700Bold,
+    MaterialIcons: require("react-native-vector-icons/Fonts/MaterialIcons.ttf"),
   });
   const store = useMemo(() => createStoreAdapter(), []);
 
@@ -376,7 +378,7 @@ export function SessionsScreen() {
         />
         {searchText.length > 0 ? (
           <Pressable style={styles.clearSearchButton} onPress={() => setSearchText("")}>
-            <Text style={styles.clearSearchButtonText}>×</Text>
+            <MaterialIcons name="close" size={20} color="#94A3B8" />
           </Pressable>
         ) : null}
       </View>
@@ -414,7 +416,7 @@ export function SessionsScreen() {
         </View>
       ) : filteredSessions.length === 0 && searchText.trim().length > 0 ? (
         <View style={styles.centerState}>
-          <Text style={styles.centerStateIcon}>⌕</Text>
+          <MaterialIcons name="search-off" size={34} color="#CBD5E1" />
           <Text style={styles.centerStateTitle}>No matching sessions</Text>
           <Text style={styles.centerStateBody}>
             {`We could not find sessions matching "${searchText.trim()}". Try a different keyword.`}
@@ -425,7 +427,7 @@ export function SessionsScreen() {
         </View>
       ) : filteredSessions.length === 0 ? (
         <View style={styles.centerState}>
-          <Text style={styles.centerStateIcon}>☰</Text>
+          <MaterialIcons name="view-list" size={34} color="#CBD5E1" />
           <Text style={styles.centerStateTitle}>No sessions yet</Text>
           <Text style={styles.centerStateBody}>
             Start a conversation to create your first session, then come back here to manage it.
@@ -455,7 +457,7 @@ export function SessionsScreen() {
                   }}
                 >
                   <View style={[styles.itemAvatar, { backgroundColor: avatarColor.bg }]}>
-                    <Text style={[styles.itemAvatarText, { color: avatarColor.fg }]}>◉</Text>
+                    <MaterialIcons name="chat-bubble" size={16} color={avatarColor.fg} />
                   </View>
                   <View style={styles.itemTextWrap}>
                     <View style={styles.itemTopLine}>
@@ -475,12 +477,14 @@ export function SessionsScreen() {
 
                 <View style={styles.itemActions}>
                   <Pressable style={styles.iconAction} onPress={() => void onTogglePin(item)}>
-                    <Text style={[styles.iconActionText, item.pinned ? styles.iconPinned : null]}>
-                      ★
-                    </Text>
+                    <MaterialIcons
+                      name={item.pinned ? "star" : "star-border"}
+                      size={16}
+                      color={item.pinned ? "#F59E0B" : "#94A3B8"}
+                    />
                   </Pressable>
                   <Pressable style={styles.iconAction} onPress={() => onOpenEdit(item)}>
-                    <Text style={styles.iconActionText}>✎</Text>
+                    <MaterialIcons name="edit" size={16} color="#94A3B8" />
                   </Pressable>
                 </View>
               </View>
@@ -606,13 +610,7 @@ const styles = StyleSheet.create({
   clearSearchButton: {
     position: "absolute",
     right: 12,
-    top: 9,
-  },
-  clearSearchButtonText: {
-    fontSize: 20,
-    color: "#94A3B8",
-    fontFamily: "SpaceGrotesk_500Medium",
-    lineHeight: 24,
+    top: 11,
   },
   tabWrap: {
     flexDirection: "row",
@@ -722,10 +720,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  itemAvatarText: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
   itemTextWrap: {
     flex: 1,
     minWidth: 0,
@@ -773,26 +767,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#F8FAFC",
   },
-  iconActionText: {
-    fontSize: 15,
-    color: "#94A3B8",
-    fontFamily: "SpaceGrotesk_500Medium",
-  },
-  iconPinned: {
-    color: "#F59E0B",
-  },
   centerState: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 32,
     gap: 8,
-  },
-  centerStateIcon: {
-    color: "#CBD5E1",
-    fontSize: 34,
-    fontFamily: "SpaceGrotesk_700Bold",
-    marginBottom: 2,
   },
   centerStateTitle: {
     color: "#0F172A",
