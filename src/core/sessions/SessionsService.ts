@@ -13,6 +13,7 @@ import type {
 } from "./types";
 
 const SESSION_PINS_KEY = "openpocket.sessions.pins.v1";
+const SESSION_LOCAL_LABELS_KEY = "openpocket.sessions.localLabels.v1";
 
 type GatewayRequester = {
   request<T = unknown>(method: string, params?: unknown): Promise<T>;
@@ -64,6 +65,7 @@ export class SessionsService {
   private readonly requester: GatewayRequester;
   private readonly store: SecureStoreAdapter;
   private readonly pinsKey: string;
+  private readonly localLabelsKey: string;
 
   /**
    * Creates a session service using Gateway requester and secure storage.
@@ -80,10 +82,12 @@ export class SessionsService {
     requester: GatewayRequester,
     store: SecureStoreAdapter,
     pinsStorageKey: string = SESSION_PINS_KEY,
+    localLabelsStorageKey: string = SESSION_LOCAL_LABELS_KEY,
   ) {
     this.requester = requester;
     this.store = store;
     this.pinsKey = pinsStorageKey;
+    this.localLabelsKey = localLabelsStorageKey;
   }
 
   /**
@@ -105,13 +109,15 @@ export class SessionsService {
     const payload = await this.requester.request("sessions.list", gatewayParams);
     const result = toListResult(payload);
     const pinnedKeys = await this.getPinnedKeys();
+    const localLabels = await this.getLocalSessionLabels();
     const normalizedSearch = normalizeText(query.search ?? "");
 
     const mapped = result.sessions.map((row) => {
       const updatedAt = toEpochMillis(row.updatedAt);
+      const localLabel = localLabels[row.key];
       return {
         key: row.key,
-        label: buildDisplayLabel(row),
+        label: typeof localLabel === "string" && localLabel.trim().length > 0 ? localLabel : buildDisplayLabel(row),
         preview: buildPreview(row),
         updatedAt,
         pinned: pinnedKeys.has(row.key),
@@ -250,5 +256,52 @@ export class SessionsService {
     const nextPinned = !current.has(key);
     await this.setPinned(key, nextPinned);
     return nextPinned;
+  }
+
+  /**
+   * Returns locally persisted session labels keyed by session key.
+   * session key をキーにしたローカル永続ラベルのマップを返します。
+   *
+   * @returns Session-keyed local label map.
+   *          session key ごとのローカルラベルマップ。
+   */
+  async getLocalSessionLabels(): Promise<Record<string, string>> {
+    const raw = await this.store.getItem(this.localLabelsKey);
+    if (!raw) {
+      return {};
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isRecord(parsed)) {
+        return {};
+      }
+      const entries = Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+      );
+      return Object.fromEntries(entries);
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Sets or clears a local-only session label override.
+   * ローカル表示専用の session ラベル上書きを設定または解除します。
+   *
+   * @param key - Session key to update.
+   *              更新対象の session key。
+   * @param label - Local label override. Empty value clears the override.
+   *                ローカル上書きラベル。空値を渡すと上書きを解除します。
+   */
+  async setLocalSessionLabel(key: string, label: string | null): Promise<void> {
+    const labels = await this.getLocalSessionLabels();
+    const normalizedLabel = label === null ? "" : label.trim();
+    if (normalizedLabel.length === 0) {
+      delete labels[key];
+    } else {
+      labels[key] = normalizedLabel;
+    }
+    await this.store.setItem(this.localLabelsKey, JSON.stringify(labels));
   }
 }
