@@ -38,7 +38,7 @@ import type { SessionListItem } from "../../core/sessions/types";
 import type { RootStackParamList } from "../../router/types";
 
 type SessionsTab = "all" | "pinned" | "recent";
-type SessionsNavigationProp = NativeStackNavigationProp<RootStackParamList, "internal/sessions">;
+type SessionsNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -435,6 +435,7 @@ export function SessionsScreen() {
         </View>
       ) : (
         <FlatList
+          style={styles.list}
           data={filteredSessions}
           keyExtractor={(item) => item.key}
           contentContainerStyle={styles.listContent}
@@ -690,8 +691,11 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingTop: 6,
-    paddingBottom: 24,
+    paddingBottom: 16,
     gap: 8,
+  },
+  list: {
+    flex: 1,
   },
   itemWrap: {
     borderRadius: 14,
