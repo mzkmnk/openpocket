@@ -28,6 +28,18 @@ WebSocket 経由で OpenClaw Gateway に接続し、セッション単位の運�
 - 実行中チャットへの送信・中断操作
 - Gateway クライアントの自動再接続サポート
 
+## スクリーンショット
+
+現在のギャラリー（2枚）:
+
+| Sessions                                  | Chat                              |
+| ----------------------------------------- | --------------------------------- |
+| ![Sessions screen](docs/img/sessions.png) | ![Chat screen](docs/img/chat.png) |
+
+追加予定:
+
+- 後ほど `docs/img/setup.png` を追加し、3パネルの hero（`Connect / Organize / Chat`）構成に拡張。
+
 ## ステータス
 
 - 主要機能は概ね実装済みで、実利用できる状態です。

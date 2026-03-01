@@ -28,6 +28,18 @@ The app connects to OpenClaw Gateway over WebSocket and focuses on session-based
 - Send and abort controls for in-flight chat runs
 - Automatic reconnect support in the Gateway client
 
+## Screenshots
+
+Current gallery (2 screenshots):
+
+| Sessions                                  | Chat                              |
+| ----------------------------------------- | --------------------------------- |
+| ![Sessions screen](docs/img/sessions.png) | ![Chat screen](docs/img/chat.png) |
+
+Planned addition:
+
+- Add `docs/img/setup.png` later, then promote this section to a 3-panel hero (`Connect / Organize / Chat`).
+
 ## Status
 
 - Core functionality is mostly implemented and usable.
