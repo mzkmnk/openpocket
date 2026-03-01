@@ -16,9 +16,10 @@ import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
   Easing,
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -62,6 +63,13 @@ type GatewayFeatureFlags = {
   canListModels: boolean;
   canPatchSession: boolean;
 };
+
+const INPUT_SINGLE_HEIGHT = 28;
+const FOOTER_BASE_BOTTOM_GAP = 10;
+const INPUT_LINE_HEIGHT = 20;
+const INPUT_MAX_LINES = 5;
+const SEND_BUTTON_SIZE = 34;
+const INPUT_MAX_HEIGHT_EXPANDED = INPUT_SINGLE_HEIGHT + (INPUT_MAX_LINES - 1) * INPUT_LINE_HEIGHT;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -506,6 +514,9 @@ export function ChatScreen() {
   const streamTextRef = useRef("");
   const streamStatusRef = useRef("");
   const messagesScrollRef = useRef<ScrollView | null>(null);
+  const isAtBottomRef = useRef(true);
+  const currentScrollYRef = useRef(0);
+  const followScrollRafRef = useRef<number | null>(null);
   const initialScrollPendingRef = useRef(false);
   const initialScrollRunningRef = useRef(false);
   const initialScrollDoneRef = useRef(false);
@@ -529,11 +540,15 @@ export function ChatScreen() {
   const [isModelModalVisible, setIsModelModalVisible] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isSwitchingModel, setIsSwitchingModel] = useState(false);
+  const [footerHeight, setFooterHeight] = useState(84);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [inputHeight, setInputHeight] = useState(INPUT_SINGLE_HEIGHT);
   const [modelFeatures, setModelFeatures] = useState<GatewayFeatureFlags>({
     canListModels: false,
     canPatchSession: false,
   });
   const streamSubPulse = useRef(new Animated.Value(0)).current;
+  const keyboardOffsetAnimated = useRef(new Animated.Value(0)).current;
   const {
     translateY: modelSheetTranslateY,
     backdropOpacity: modelBackdropOpacity,
@@ -558,6 +573,12 @@ export function ChatScreen() {
     }),
     [streamSubPulse],
   );
+  const isKeyboardVisible = keyboardOffset > 0;
+  const inferInputHeight = useCallback((text: string): number => {
+    const lineCount = Math.max(1, text.split(/\r\n|\r|\n/).length);
+    const inferredHeight = INPUT_SINGLE_HEIGHT + (lineCount - 1) * INPUT_LINE_HEIGHT;
+    return Math.max(INPUT_SINGLE_HEIGHT, Math.min(INPUT_MAX_HEIGHT_EXPANDED, inferredHeight));
+  }, []);
 
   const closeModelPicker = useCallback(() => {
     animateModelModalOut(() => {
@@ -574,6 +595,13 @@ export function ChatScreen() {
     initialScrollRunningRef.current = false;
   }, []);
 
+  const cancelFollowScrollAnimation = useCallback(() => {
+    if (followScrollRafRef.current !== null) {
+      cancelAnimationFrame(followScrollRafRef.current);
+      followScrollRafRef.current = null;
+    }
+  }, []);
+
   const scrollToBottom = useCallback(
     (animated: boolean) => {
       cancelInitialScrollAnimation();
@@ -582,6 +610,68 @@ export function ChatScreen() {
       });
     },
     [cancelInitialScrollAnimation],
+  );
+
+  const scrollToBottomSmooth = useCallback(
+    (durationMs?: number) => {
+      const scrollView = messagesScrollRef.current;
+      if (!scrollView) {
+        return;
+      }
+      const maxOffset = contentHeightRef.current - viewportHeightRef.current;
+      if (!Number.isFinite(maxOffset) || maxOffset <= 0) {
+        return;
+      }
+
+      cancelFollowScrollAnimation();
+      const startY = Math.max(0, Math.min(currentScrollYRef.current, maxOffset));
+      const targetY = maxOffset;
+      const distance = targetY - startY;
+      if (Math.abs(distance) < 2) {
+        scrollView.scrollTo({ y: targetY, animated: false });
+        currentScrollYRef.current = targetY;
+        return;
+      }
+
+      const duration = Math.max(120, Math.min(320, durationMs ?? 220));
+      const startedAt = Date.now();
+      const easeOutCubic = (value: number) => 1 - (1 - value) ** 3;
+
+      const tick = () => {
+        const elapsed = Date.now() - startedAt;
+        const progress = Math.min(1, elapsed / duration);
+        const nextY = startY + distance * easeOutCubic(progress);
+        scrollView.scrollTo({ y: nextY, animated: false });
+        currentScrollYRef.current = nextY;
+        if (progress >= 1) {
+          followScrollRafRef.current = null;
+          return;
+        }
+        followScrollRafRef.current = requestAnimationFrame(tick);
+      };
+
+      followScrollRafRef.current = requestAnimationFrame(tick);
+    },
+    [cancelFollowScrollAnimation],
+  );
+
+  const updateKeyboardOffset = useCallback(
+    (next: number, durationMs?: number) => {
+      const normalized = Math.max(0, next);
+      setKeyboardOffset(normalized);
+      Animated.timing(keyboardOffsetAnimated, {
+        toValue: normalized,
+        duration: typeof durationMs === "number" ? Math.max(80, durationMs) : 180,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+      if (isAtBottomRef.current) {
+        requestAnimationFrame(() => {
+          scrollToBottomSmooth(durationMs);
+        });
+      }
+    },
+    [keyboardOffsetAnimated, scrollToBottomSmooth],
   );
 
   const maybeRunInitialScroll = useCallback(() => {
@@ -694,6 +784,73 @@ export function ChatScreen() {
       streamSubPulse.setValue(0);
     };
   }, [streamStatus, streamSubPulse]);
+
+  useEffect(() => {
+    if (!isKeyboardVisible) {
+      setInputHeight(INPUT_SINGLE_HEIGHT);
+      return;
+    }
+    setInputHeight(inferInputHeight(draft));
+  }, [draft, inferInputHeight, isKeyboardVisible]);
+
+  useEffect(() => {
+    const screenHeight = Dimensions.get("window").height;
+
+    const computeKeyboardHeight = (screenY?: number, fallbackHeight?: number): number => {
+      if (typeof screenY === "number") {
+        return Math.max(0, screenHeight - screenY);
+      }
+      if (typeof fallbackHeight === "number") {
+        return Math.max(0, fallbackHeight);
+      }
+      return 0;
+    };
+
+    if (Platform.OS === "ios") {
+      const showSub = Keyboard.addListener("keyboardWillShow", (event) => {
+        Keyboard.scheduleLayoutAnimation(event);
+        const height = computeKeyboardHeight(
+          event.endCoordinates?.screenY,
+          event.endCoordinates?.height,
+        );
+        updateKeyboardOffset(height, event.duration);
+      });
+      const changeSub = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
+        Keyboard.scheduleLayoutAnimation(event);
+        const height = computeKeyboardHeight(
+          event.endCoordinates?.screenY,
+          event.endCoordinates?.height,
+        );
+        updateKeyboardOffset(height, event.duration);
+      });
+      const hideSub = Keyboard.addListener("keyboardWillHide", (event) => {
+        Keyboard.scheduleLayoutAnimation(event);
+        updateKeyboardOffset(0, event.duration);
+      });
+
+      return () => {
+        showSub.remove();
+        changeSub.remove();
+        hideSub.remove();
+      };
+    }
+
+    const showSub = Keyboard.addListener("keyboardDidShow", (event) => {
+      const height = computeKeyboardHeight(
+        event.endCoordinates?.screenY,
+        event.endCoordinates?.height,
+      );
+      updateKeyboardOffset(height, 120);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      updateKeyboardOffset(0, 120);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [updateKeyboardOffset]);
 
   const onChatEvent = useCallback(
     (payload: ChatEventPayload) => {
@@ -1005,13 +1162,14 @@ export function ChatScreen() {
       unsubscribeRef.current = null;
       activeRunIdRef.current = null;
       streamStatusRef.current = "";
+      cancelFollowScrollAnimation();
       clientRef.current?.disconnect();
       clientRef.current = null;
       chatServiceRef.current = null;
       sessionsServiceRef.current = null;
       modelsServiceRef.current = null;
     };
-  }, [cancelInitialScrollAnimation, initialize]);
+  }, [cancelFollowScrollAnimation, cancelInitialScrollAnimation, initialize]);
 
   if (!fontsLoaded) {
     return null;
@@ -1019,11 +1177,7 @@ export function ChatScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <KeyboardAvoidingView
-        style={styles.root}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
-      >
+      <View style={styles.root}>
         <View style={styles.header}>
           <Pressable style={styles.headerIconButton} onPress={() => navigation.goBack()}>
             <MaterialIcons name="arrow-back" size={18} color="#0F172A" />
@@ -1040,9 +1194,7 @@ export function ChatScreen() {
               </Text>
             </View>
           </View>
-          <Pressable style={styles.headerIconButton} onPress={() => void initialize()}>
-            <MaterialIcons name="refresh" size={18} color="#0F172A" />
-          </Pressable>
+          <View style={styles.headerIconSpacer} />
         </View>
 
         {errorMessage ? (
@@ -1066,9 +1218,16 @@ export function ChatScreen() {
         ) : (
           <ScrollView
             ref={messagesScrollRef}
-            contentContainerStyle={styles.messagesContent}
-            style={styles.messagesArea}
+            contentContainerStyle={[
+              styles.messagesContent,
+              messages.length === 0 ? styles.messagesContentEmpty : null,
+              {
+                paddingBottom: Math.max(20, footerHeight + FOOTER_BASE_BOTTOM_GAP),
+              },
+            ]}
+            style={[styles.messagesArea, { marginBottom: keyboardOffset }]}
             keyboardShouldPersistTaps="handled"
+            scrollEventThrottle={16}
             onLayout={(event) => {
               viewportHeightRef.current = event.nativeEvent.layout.height;
               maybeRunInitialScroll();
@@ -1077,13 +1236,18 @@ export function ChatScreen() {
               contentHeightRef.current = height;
               maybeRunInitialScroll();
             }}
+            onScroll={(event) => {
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              currentScrollYRef.current = contentOffset.y;
+              const distanceFromBottom =
+                contentSize.height - (contentOffset.y + layoutMeasurement.height);
+              isAtBottomRef.current = distanceFromBottom <= 36;
+            }}
           >
             {messages.length === 0 ? (
               <View style={styles.emptyStateWrap}>
-                <Text style={styles.emptyStateTitle}>No messages yet</Text>
-                <Text style={styles.emptyStateBody}>
-                  Send your first message to start this session.
-                </Text>
+                <Text style={styles.emptyStateTitle}>Ready when you are</Text>
+                <Text style={styles.emptyStateBody}>Let&apos;s get started.</Text>
               </View>
             ) : null}
 
@@ -1182,16 +1346,62 @@ export function ChatScreen() {
           </ScrollView>
         )}
 
-        <View style={styles.footer}>
+        <Animated.View
+          style={[
+            styles.footer,
+            {
+              transform: [
+                {
+                  translateY: Animated.multiply(keyboardOffsetAnimated, -1),
+                },
+              ],
+            },
+          ]}
+          onLayout={(event) => {
+            setFooterHeight(event.nativeEvent.layout.height);
+          }}
+        >
           <View style={styles.inputRow}>
-            <View style={styles.inputWrap}>
+            <View
+              style={[
+                styles.inputWrap,
+                {
+                  minHeight: isKeyboardVisible ? inputHeight + 12 : SEND_BUTTON_SIZE,
+                },
+              ]}
+            >
               <TextInput
                 value={draft}
-                onChangeText={setDraft}
+                onChangeText={(text) => {
+                  setDraft(text);
+                  if (!isKeyboardVisible) {
+                    return;
+                  }
+                  const next = inferInputHeight(text);
+                  setInputHeight(next);
+                }}
                 placeholder="Message OpenClaw..."
                 placeholderTextColor="#71717A"
-                style={styles.textInput}
+                style={[
+                  styles.textInput,
+                  {
+                    height: isKeyboardVisible ? inputHeight : INPUT_SINGLE_HEIGHT,
+                    maxHeight: isKeyboardVisible ? INPUT_MAX_HEIGHT_EXPANDED : INPUT_SINGLE_HEIGHT,
+                  },
+                ]}
                 multiline
+                scrollEnabled={isKeyboardVisible && inputHeight >= INPUT_MAX_HEIGHT_EXPANDED}
+                onContentSizeChange={(event) => {
+                  if (!isKeyboardVisible) {
+                    return;
+                  }
+                  const measuredHeight = Math.ceil(event.nativeEvent.contentSize.height);
+                  const next = Math.max(
+                    INPUT_SINGLE_HEIGHT,
+                    Math.min(INPUT_MAX_HEIGHT_EXPANDED, measuredHeight),
+                  );
+                  setInputHeight(next);
+                }}
               />
             </View>
             {isStreaming ? (
@@ -1217,7 +1427,7 @@ export function ChatScreen() {
             )}
           </View>
           <Text style={styles.disclaimer}>OpenClaw can make mistakes. Verify important info.</Text>
-        </View>
+        </Animated.View>
 
         <Modal
           visible={isModelModalVisible}
@@ -1285,7 +1495,7 @@ export function ChatScreen() {
             </Animated.View>
           </View>
         </Modal>
-      </KeyboardAvoidingView>
+      </View>
       <StatusBar style="dark" />
     </SafeAreaView>
   );
@@ -1314,6 +1524,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8FAFC",
     borderWidth: 1,
     borderColor: "#E2E8F0",
+  },
+  headerIconSpacer: {
+    width: 36,
+    height: 36,
   },
   headerCenter: {
     flex: 1,
@@ -1377,28 +1591,32 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messagesContent: {
+    flexGrow: 1,
     paddingHorizontal: 16,
     paddingTop: 18,
     paddingBottom: 20,
     gap: 22,
   },
+  messagesContentEmpty: {
+    justifyContent: "center",
+  },
   emptyStateWrap: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    backgroundColor: "#F8FAFC",
-    padding: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
     gap: 4,
   },
   emptyStateTitle: {
     color: "#0F172A",
     fontFamily: "SpaceGrotesk_700Bold",
-    fontSize: 13,
+    fontSize: 20,
+    textAlign: "center",
   },
   emptyStateBody: {
     color: "#64748B",
     fontFamily: "SpaceGrotesk_400Regular",
-    fontSize: 12,
+    fontSize: 14,
+    textAlign: "center",
   },
   messageRow: {
     flexDirection: "row",
@@ -1525,41 +1743,46 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   footer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: "rgba(255, 255, 255, 0.96)",
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 12,
+    paddingBottom: FOOTER_BASE_BOTTOM_GAP,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
   },
   inputRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
     gap: 8,
   },
   inputWrap: {
     flex: 1,
-    minHeight: 34,
+    minHeight: SEND_BUTTON_SIZE,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E2E8F0",
     backgroundColor: "#F8FAFC",
     paddingHorizontal: 6,
-    paddingVertical: 0,
+    paddingVertical: 4,
     justifyContent: "center",
   },
   textInput: {
-    flex: 1,
-    maxHeight: 120,
-    minHeight: 22,
+    minHeight: INPUT_SINGLE_HEIGHT,
     color: "#0F172A",
     fontSize: 14,
     lineHeight: 20,
-    paddingVertical: 6,
+    paddingVertical: 4,
     paddingHorizontal: 8,
     fontFamily: "SpaceGrotesk_400Regular",
+    textAlignVertical: "top",
   },
   sendButton: {
-    width: 34,
-    height: 34,
+    width: SEND_BUTTON_SIZE,
+    height: SEND_BUTTON_SIZE,
     borderRadius: 9999,
     backgroundColor: "#3B82F6",
     alignItems: "center",
@@ -1575,7 +1798,7 @@ const styles = StyleSheet.create({
   abortButton: {
     borderRadius: 8,
     minWidth: 44,
-    height: 34,
+    height: SEND_BUTTON_SIZE,
     paddingHorizontal: 12,
     backgroundColor: "#DC2626",
     alignItems: "center",
