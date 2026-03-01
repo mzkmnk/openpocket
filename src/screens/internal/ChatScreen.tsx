@@ -14,6 +14,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -57,6 +59,8 @@ type GatewayFeatureFlags = {
   canListModels: boolean;
   canPatchSession: boolean;
 };
+
+const MODEL_SHEET_CLOSED_Y = 420;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -224,6 +228,42 @@ export function ChatScreen() {
     canListModels: false,
     canPatchSession: false,
   });
+  const modelSheetTranslateY = useRef(new Animated.Value(MODEL_SHEET_CLOSED_Y)).current;
+  const modelBackdropOpacity = useMemo(
+    () =>
+      modelSheetTranslateY.interpolate({
+        inputRange: [0, MODEL_SHEET_CLOSED_Y],
+        outputRange: [1, 0],
+        extrapolate: "clamp",
+      }),
+    [modelSheetTranslateY],
+  );
+
+  const animateModelModalIn = useCallback(() => {
+    modelSheetTranslateY.stopAnimation();
+    Animated.spring(modelSheetTranslateY, {
+      toValue: 0,
+      damping: 20,
+      stiffness: 260,
+      mass: 0.8,
+      useNativeDriver: true,
+    }).start();
+  }, [modelSheetTranslateY]);
+
+  const closeModelPicker = useCallback(() => {
+    modelSheetTranslateY.stopAnimation();
+    Animated.timing(modelSheetTranslateY, {
+      toValue: MODEL_SHEET_CLOSED_Y,
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setIsModelModalVisible(false);
+        modelSheetTranslateY.setValue(MODEL_SHEET_CLOSED_Y);
+      }
+    });
+  }, [modelSheetTranslateY]);
 
   const cancelInitialScrollAnimation = useCallback(() => {
     if (initialScrollRafRef.current !== null) {
@@ -393,11 +433,22 @@ export function ChatScreen() {
       setModelUiError("This gateway does not allow sessions.patch for model switching.");
       return;
     }
-    if (modelOptions.length === 0) {
-      await loadModelCatalog();
-    }
     setIsModelModalVisible(true);
-  }, [loadModelCatalog, modelFeatures.canListModels, modelFeatures.canPatchSession, modelOptions]);
+    modelSheetTranslateY.setValue(MODEL_SHEET_CLOSED_Y);
+    requestAnimationFrame(() => {
+      animateModelModalIn();
+    });
+    if (modelOptions.length === 0) {
+      void loadModelCatalog();
+    }
+  }, [
+    animateModelModalIn,
+    loadModelCatalog,
+    modelFeatures.canListModels,
+    modelFeatures.canPatchSession,
+    modelOptions,
+    modelSheetTranslateY,
+  ]);
 
   const selectModel = useCallback(
     async (modelId: string) => {
@@ -411,14 +462,14 @@ export function ChatScreen() {
       try {
         await service.updateSessionModel(sessionKey, modelId);
         setSelectedModelId(modelId);
-        setIsModelModalVisible(false);
+        closeModelPicker();
       } catch (error) {
         setModelUiError(error instanceof Error ? error.message : "Failed to switch model");
       } finally {
         setIsSwitchingModel(false);
       }
     },
-    [isSwitchingModel, sessionKey],
+    [closeModelPicker, isSwitchingModel, sessionKey],
   );
 
   const initialize = useCallback(async () => {
@@ -770,20 +821,28 @@ export function ChatScreen() {
         <Modal
           visible={isModelModalVisible}
           transparent
-          animationType="fade"
-          onRequestClose={() => setIsModelModalVisible(false)}
+          animationType="none"
+          onRequestClose={() => closeModelPicker()}
         >
           <View style={styles.modalRoot}>
-            <Pressable style={styles.modalBackdrop} onPress={() => setIsModelModalVisible(false)} />
-            <View style={styles.modelSheet}>
-              <View style={styles.modelSheetHandle} />
+            <Animated.View style={[styles.modalBackdrop, { opacity: modelBackdropOpacity }]}>
+              <Pressable style={styles.modalBackdropPressable} onPress={() => closeModelPicker()} />
+            </Animated.View>
+            <Animated.View
+              style={[
+                styles.modelSheet,
+                {
+                  transform: [{ translateY: modelSheetTranslateY }],
+                },
+              ]}
+            >
               <View style={styles.modelSheetHeader}>
                 <Text style={styles.modelSheetTitle}>Model</Text>
                 <Pressable
                   style={styles.modelSheetCloseButton}
-                  onPress={() => setIsModelModalVisible(false)}
+                  onPress={() => closeModelPicker()}
                 >
-                  <MaterialIcons name="close" size={22} color="#334155" />
+                  <MaterialIcons name="close" size={16} color="#334155" />
                 </Pressable>
               </View>
               {isLoadingModels ? (
@@ -811,7 +870,7 @@ export function ChatScreen() {
                           <Text style={styles.modelItemName}>{item.name}</Text>
                           <Text style={styles.modelItemMeta}>{item.provider}</Text>
                         </View>
-                        {isSelected ? <MaterialIcons name="check" size={26} color="#0284C7" /> : null}
+                        {isSelected ? <MaterialIcons name="check" size={20} color="#0284C7" /> : null}
                       </Pressable>
                     );
                   }}
@@ -820,7 +879,7 @@ export function ChatScreen() {
               {isSwitchingModel ? (
                 <Text style={styles.modelSwitchingText}>Applying model...</Text>
               ) : null}
-            </View>
+            </Animated.View>
           </View>
         </Modal>
       </KeyboardAvoidingView>
@@ -1107,24 +1166,19 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(15, 23, 42, 0.24)",
   },
+  modalBackdropPressable: {
+    ...StyleSheet.absoluteFillObject,
+  },
   modelSheet: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     backgroundColor: "#FFFFFF",
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 14,
     paddingBottom: 24,
     maxHeight: "78%",
     borderTopWidth: 1,
     borderColor: "#E2E8F0",
-  },
-  modelSheetHandle: {
-    width: 42,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: "#CBD5E1",
-    alignSelf: "center",
-    marginBottom: 10,
   },
   modelSheetHeader: {
     flexDirection: "row",
@@ -1138,9 +1192,9 @@ const styles = StyleSheet.create({
     fontSize: 22,
   },
   modelSheetCloseButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F1F5F9",
