@@ -16,12 +16,12 @@ import {
   Animated,
   Platform,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { SecureStoreAdapter } from "../../core/security/secureStore";
 import { SessionsService } from "../../core/sessions/SessionsService";

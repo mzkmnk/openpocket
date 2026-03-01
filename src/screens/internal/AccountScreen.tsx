@@ -5,7 +5,8 @@ import {
   useFonts,
 } from "@expo-google-fonts/space-grotesk";
 import { StatusBar } from "expo-status-bar";
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 
 type AccountAction = Readonly<{
