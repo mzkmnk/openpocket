@@ -21,6 +21,8 @@ import { loadOrCreateDeviceIdentity, persistDeviceToken } from "../../core/secur
 import type { SecureStoreAdapter } from "../../core/security/secureStore";
 import type { RootStackParamList } from "../../router/types";
 
+const AUTH_PROMPT_MESSAGE = "Authenticate with Face ID / Biometrics to open OpenPocket";
+
 function createStoreAdapter(): SecureStoreAdapter {
   if (Platform.OS === "web") {
     return {
@@ -54,13 +56,36 @@ async function authenticateOnLaunch(): Promise<void> {
     return;
   }
 
+  const supportedTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
+  const supportsFacialRecognition = supportedTypes.includes(
+    LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION,
+  );
+
+  if (Platform.OS === "ios" && !supportsFacialRecognition) {
+    throw new Error("Face ID is not available on this device.");
+  }
+
   const result = await LocalAuthentication.authenticateAsync({
-    promptMessage: "Authenticate to open OpenPocket",
+    promptMessage: AUTH_PROMPT_MESSAGE,
     cancelLabel: "Cancel",
+    disableDeviceFallback: true,
+    fallbackLabel: "",
+    biometricsSecurityLevel: "strong",
   });
 
   if (!result.success) {
-    throw new Error("Biometric authentication was canceled or failed.");
+    switch (result.error) {
+      case "user_cancel":
+      case "system_cancel":
+        throw new Error("Authentication was canceled.");
+      case "not_enrolled":
+      case "passcode_not_set":
+        throw new Error("Biometric authentication is not set up on this device.");
+      case "lockout":
+        throw new Error("Biometrics are locked. Unlock biometrics in system settings and retry.");
+      default:
+        throw new Error("Biometric authentication failed.");
+    }
   }
 }
 
