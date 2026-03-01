@@ -11,6 +11,7 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Markdown from "react-native-markdown-display";
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import {
   ActivityIndicator,
@@ -369,6 +370,117 @@ function readGatewayFeatureFlags(hello: unknown): GatewayFeatureFlags {
     canListModels: methods.has("models.list"),
     canPatchSession: methods.has("sessions.patch"),
   };
+}
+
+const assistantMarkdownStyles = StyleSheet.create({
+  body: {
+    color: "#0F172A",
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "SpaceGrotesk_400Regular",
+  },
+  paragraph: {
+    marginTop: 0,
+    marginBottom: 8,
+  },
+  text: {
+    color: "#0F172A",
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "SpaceGrotesk_400Regular",
+  },
+  bullet_list: {
+    marginTop: 0,
+    marginBottom: 8,
+  },
+  ordered_list: {
+    marginTop: 0,
+    marginBottom: 8,
+  },
+  code_inline: {
+    color: "#0F172A",
+    backgroundColor: "rgba(15, 23, 42, 0.08)",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    overflow: "hidden",
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  code_block: {
+    color: "#E2E8F0",
+    backgroundColor: "#0F172A",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  fence: {
+    color: "#E2E8F0",
+    backgroundColor: "#0F172A",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
+    fontSize: 12,
+    lineHeight: 18,
+  },
+});
+
+const userMarkdownStyles = StyleSheet.create({
+  ...assistantMarkdownStyles,
+  body: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "SpaceGrotesk_400Regular",
+  },
+  text: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "SpaceGrotesk_400Regular",
+  },
+  code_inline: {
+    color: "#FFFFFF",
+    backgroundColor: "rgba(255, 255, 255, 0.18)",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    overflow: "hidden",
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
+    fontSize: 12,
+    lineHeight: 18,
+  },
+});
+
+function MessageBody({ body, isAssistant }: { body: string; isAssistant: boolean }) {
+  return (
+    <Markdown style={isAssistant ? assistantMarkdownStyles : userMarkdownStyles}>{body}</Markdown>
+  );
 }
 
 export function ChatScreen() {
@@ -1034,14 +1146,7 @@ export function ChatScreen() {
                           isAssistant ? styles.assistantBubble : styles.userBubble,
                         ]}
                       >
-                        <Text
-                          style={[
-                            styles.bubbleText,
-                            isAssistant ? styles.assistantBubbleText : styles.userBubbleText,
-                          ]}
-                        >
-                          {message.body}
-                        </Text>
+                        <MessageBody body={message.body} isAssistant={isAssistant} />
                       </View>
                     ) : null}
                     {isAssistant && message.activityStatus ? (
@@ -1091,9 +1196,7 @@ export function ChatScreen() {
                   ) : null}
                   {streamText.trim().length > 0 ? (
                     <View style={[styles.bubble, styles.assistantBubble]}>
-                      <Text style={[styles.bubbleText, styles.assistantBubbleText]}>
-                        {streamText}
-                      </Text>
+                      <MessageBody body={streamText} isAssistant />
                     </View>
                   ) : null}
                 </View>
