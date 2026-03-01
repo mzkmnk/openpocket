@@ -837,7 +837,6 @@ export function ChatScreen() {
     [closeModelPicker, isSwitchingModel, sessionKey],
   );
 
-
   const initialize = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage("");

@@ -454,7 +454,14 @@ export function SessionsScreen() {
         endCreateRun();
       }
     },
-    [agentsMainKey, beginCreateRun, closeAgentPicker, endCreateRun, openChatForSession, refreshSessions],
+    [
+      agentsMainKey,
+      beginCreateRun,
+      closeAgentPicker,
+      endCreateRun,
+      openChatForSession,
+      refreshSessions,
+    ],
   );
 
   const onPressNew = useCallback(() => {
