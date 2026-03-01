@@ -84,6 +84,31 @@ export type SessionsPatchResult = {
 };
 
 /**
+ * Reason values accepted by Gateway `sessions.reset`.
+ * Gateway `sessions.reset` が受け付ける reason 値です。
+ */
+export type SessionsResetReason = "new" | "reset";
+
+/**
+ * Parameters accepted by Gateway `sessions.reset`.
+ * Gateway `sessions.reset` が受け付けるパラメータです。
+ */
+export type SessionsResetParams = {
+  key: string;
+  reason?: SessionsResetReason;
+};
+
+/**
+ * Result returned by Gateway `sessions.reset`.
+ * Gateway `sessions.reset` が返す結果です。
+ */
+export type SessionsResetResult = {
+  ok: boolean;
+  key?: string | null;
+  entry?: Record<string, unknown> | null;
+};
+
+/**
  * Normalized session model for app-side list rendering.
  * アプリ側の一覧表示向けに正規化した session モデルです。
  */

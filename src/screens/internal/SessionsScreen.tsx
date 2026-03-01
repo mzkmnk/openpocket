@@ -110,6 +110,17 @@ function colorForSession(key: string): { bg: string; fg: string } {
   return palette[hash % palette.length] ?? palette[0];
 }
 
+function createNewSessionKey(deviceId?: string): string {
+  const safeDeviceId = (deviceId ?? "mobile")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 12);
+  const timestampPart = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  return `${safeDeviceId}-${timestampPart}-${randomPart}`;
+}
+
 export function SessionsScreen() {
   const navigation = useNavigation<SessionsNavigationProp>();
   const [fontsLoaded] = useFonts({
@@ -131,12 +142,13 @@ export function SessionsScreen() {
   const [editingSession, setEditingSession] = useState<SessionListItem | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
   const [isSavingLabel, setIsSavingLabel] = useState(false);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
 
   const clientRef = useRef<GatewayClient | null>(null);
   const serviceRef = useRef<SessionsService | null>(null);
 
   const refreshSessions = useCallback(
-    async (useRefreshingState: boolean) => {
+    async (useRefreshingState: boolean): Promise<SessionListItem[]> => {
       const service = serviceRef.current;
       if (!service) {
         throw new Error("Session service is not ready");
@@ -155,8 +167,10 @@ export function SessionsScreen() {
         if (result.length > 0 && !activeSessionKey) {
           setActiveSessionKey(result[0]?.key ?? "");
         }
+        return result;
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Failed to load sessions");
+        return [];
       } finally {
         if (useRefreshingState) {
           setIsRefreshing(false);
@@ -283,6 +297,41 @@ export function SessionsScreen() {
     }
   }, [draftLabel, editingSession, refreshSessions]);
 
+  const onCreateSession = useCallback(async () => {
+    const service = serviceRef.current;
+    if (!service) {
+      return;
+    }
+
+    setIsCreatingSession(true);
+    setErrorMessage("");
+    try {
+      const provisionalKey = createNewSessionKey(identity?.deviceId);
+      const resetResult = await service.resetSession(provisionalKey, "new");
+      const nextKey =
+        typeof resetResult.key === "string" && resetResult.key.trim().length > 0
+          ? resetResult.key
+          : provisionalKey;
+
+      const refreshed = await refreshSessions(true);
+      const target =
+        refreshed.find((item) => item.key === nextKey) ??
+        refreshed.find((item) => item.key === provisionalKey);
+      const resolvedKey = target?.key ?? nextKey;
+      const resolvedLabel = target?.label ?? "New Session";
+
+      setActiveSessionKey(resolvedKey);
+      navigation.navigate("internal/chat", {
+        sessionKey: resolvedKey,
+        sessionLabel: resolvedLabel,
+      });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to create session");
+    } finally {
+      setIsCreatingSession(false);
+    }
+  }, [identity?.deviceId, navigation, refreshSessions]);
+
   if (!fontsLoaded) {
     return null;
   }
@@ -291,13 +340,24 @@ export function SessionsScreen() {
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.title}>Sessions</Text>
-        <Pressable
-          style={styles.refreshButton}
-          onPress={() => void refreshSessions(true)}
-          disabled={isRefreshing || isLoading}
-        >
-          <Text style={styles.refreshButtonText}>{isRefreshing ? "..." : "Refresh"}</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            style={[styles.refreshButton, styles.newButton]}
+            onPress={() => void onCreateSession()}
+            disabled={isCreatingSession || isLoading}
+          >
+            <Text style={[styles.refreshButtonText, styles.newButtonText]}>
+              {isCreatingSession ? "..." : "New"}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.refreshButton}
+            onPress={() => void refreshSessions(true)}
+            disabled={isRefreshing || isLoading}
+          >
+            <Text style={styles.refreshButtonText}>{isRefreshing ? "..." : "Refresh"}</Text>
+          </Pressable>
+        </View>
       </View>
 
       <Text style={styles.connectionText}>
@@ -486,6 +546,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   title: {
     fontFamily: "SpaceGrotesk_700Bold",
     fontSize: 28,
@@ -500,10 +565,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     backgroundColor: "#F8FAFC",
   },
+  newButton: {
+    borderColor: "#137FEC",
+    backgroundColor: "#EFF6FF",
+  },
   refreshButtonText: {
     fontFamily: "SpaceGrotesk_500Medium",
     fontSize: 12,
     color: "#334155",
+  },
+  newButtonText: {
+    color: "#0B61C0",
   },
   connectionText: {
     paddingHorizontal: 16,
