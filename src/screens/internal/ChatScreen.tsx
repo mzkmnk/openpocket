@@ -281,8 +281,7 @@ function mapHistoryMessages(messages: unknown[]): UiMessage[] {
       const content = resolveContentField(record);
       const body = extractDisplayTextFromContent(content);
       const liveStatus = role === "assistant" ? resolveLiveStatusFromContent(content) : "";
-      const activityStatus =
-        liveStatus === "thinking..." ? liveStatus : "";
+      const activityStatus = liveStatus === "thinking..." ? liveStatus : "";
       const createdAt =
         typeof record.createdAt === "number"
           ? record.createdAt
@@ -836,7 +835,14 @@ export function ChatScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [cancelInitialScrollAnimation, initialSessionModel, onChatEvent, sessionKey, setLiveStatus, store]);
+  }, [
+    cancelInitialScrollAnimation,
+    initialSessionModel,
+    onChatEvent,
+    sessionKey,
+    setLiveStatus,
+    store,
+  ]);
 
   const sendMessage = useCallback(async () => {
     const service = chatServiceRef.current;
@@ -1071,7 +1077,13 @@ export function ChatScreen() {
                   </View>
                   {streamStatus.trim().length > 0 ? (
                     <Animated.View style={[styles.subEventsWrap, streamSubAnimatedStyle]}>
-                      <View style={[styles.subEventChip, styles.subEventLive, styles.subEventLiveStatus]}>
+                      <View
+                        style={[
+                          styles.subEventChip,
+                          styles.subEventLive,
+                          styles.subEventLiveStatus,
+                        ]}
+                      >
                         <View style={[styles.subEventDot, styles.subEventDotLive]} />
                         <Text style={styles.subEventText}>{streamStatus}</Text>
                       </View>
