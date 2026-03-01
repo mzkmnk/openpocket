@@ -647,7 +647,7 @@ export function ChatScreen() {
       >
         <View style={styles.header}>
           <Pressable style={styles.headerIconButton} onPress={() => navigation.goBack()}>
-            <Text style={styles.headerIcon}>←</Text>
+            <MaterialIcons name="arrow-back" size={18} color="#0F172A" />
           </Pressable>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>
@@ -662,7 +662,7 @@ export function ChatScreen() {
             </View>
           </View>
           <Pressable style={styles.headerIconButton} onPress={() => void initialize()}>
-            <Text style={styles.headerIcon}>↻</Text>
+            <MaterialIcons name="refresh" size={18} color="#0F172A" />
           </Pressable>
         </View>
 
@@ -811,7 +811,12 @@ export function ChatScreen() {
                 onPress={() => void sendMessage()}
                 disabled={draft.trim().length === 0 || isSending}
               >
-                <Text style={styles.sendButtonText}>{isSending ? "..." : "↑"}</Text>
+                <MaterialIcons
+                  name="north"
+                  size={18}
+                  color="#FFFFFF"
+                  style={styles.sendButtonIcon}
+                />
               </Pressable>
             )}
           </View>
@@ -913,11 +918,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8FAFC",
     borderWidth: 1,
     borderColor: "#E2E8F0",
-  },
-  headerIcon: {
-    color: "#0F172A",
-    fontSize: 16,
-    fontFamily: "SpaceGrotesk_700Bold",
   },
   headerCenter: {
     flex: 1,
@@ -1133,11 +1133,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#1D4ED8",
     opacity: 0.5,
   },
-  sendButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    lineHeight: 20,
-    fontFamily: "SpaceGrotesk_700Bold",
+  sendButtonIcon: {
+    marginTop: -1,
   },
   abortButton: {
     borderRadius: 8,
