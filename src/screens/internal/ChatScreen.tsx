@@ -11,9 +11,12 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import {
   ActivityIndicator,
+  FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -27,6 +30,8 @@ import {
 import { ChatService } from "../../core/chat/ChatService";
 import type { ChatEventPayload } from "../../core/chat/types";
 import { GatewayClient } from "../../core/gateway/GatewayClient";
+import { ModelsService } from "../../core/models/ModelsService";
+import type { ModelChoice } from "../../core/models/types";
 import { loadGatewayConnectionSecrets } from "../../core/security/connectionSecrets";
 import {
   loadOrCreateDeviceIdentity,
@@ -35,6 +40,7 @@ import {
 } from "../../core/security/deviceIdentity";
 import { buildGatewayOperatorConnectParams } from "../../core/security/deviceAuth";
 import type { SecureStoreAdapter } from "../../core/security/secureStore";
+import { SessionsService } from "../../core/sessions/SessionsService";
 import type { RootStackParamList } from "../../router/types";
 
 type ChatNavigationProp = NativeStackNavigationProp<RootStackParamList, "internal/chat">;
@@ -45,6 +51,11 @@ type UiMessage = {
   role: "assistant" | "user";
   body: string;
   time: string;
+};
+
+type GatewayFeatureFlags = {
+  canListModels: boolean;
+  canPatchSession: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -147,11 +158,29 @@ function initialsForRole(role: UiMessage["role"]): string {
   return role === "assistant" ? "OC" : "YO";
 }
 
+function readGatewayFeatureFlags(hello: unknown): GatewayFeatureFlags {
+  if (!isRecord(hello) || !isRecord(hello.features) || !Array.isArray(hello.features.methods)) {
+    return {
+      canListModels: false,
+      canPatchSession: false,
+    };
+  }
+
+  const methods = new Set(
+    hello.features.methods.filter((method): method is string => typeof method === "string"),
+  );
+  return {
+    canListModels: methods.has("models.list"),
+    canPatchSession: methods.has("sessions.patch"),
+  };
+}
+
 export function ChatScreen() {
   const [fontsLoaded] = useFonts({
     SpaceGrotesk_400Regular,
     SpaceGrotesk_500Medium,
     SpaceGrotesk_700Bold,
+    MaterialIcons: require("react-native-vector-icons/Fonts/MaterialIcons.ttf"),
   });
   const navigation = useNavigation<ChatNavigationProp>();
   const route = useRoute<ChatRouteProp>();
@@ -159,9 +188,12 @@ export function ChatScreen() {
 
   const sessionKey = route.params?.sessionKey?.trim() ?? "";
   const sessionLabel = route.params?.sessionLabel?.trim() ?? "Chat";
+  const initialSessionModel = route.params?.sessionModel?.trim() ?? "";
 
   const clientRef = useRef<GatewayClient | null>(null);
   const chatServiceRef = useRef<ChatService | null>(null);
+  const sessionsServiceRef = useRef<SessionsService | null>(null);
+  const modelsServiceRef = useRef<ModelsService | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const streamTextRef = useRef("");
@@ -182,6 +214,16 @@ export function ChatScreen() {
   const [errorMessage, setErrorMessage] = useState("");
   const [connectionDetail, setConnectionDetail] = useState("Connecting to gateway...");
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
+  const [modelOptions, setModelOptions] = useState<ModelChoice[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState(initialSessionModel);
+  const [modelUiError, setModelUiError] = useState("");
+  const [isModelModalVisible, setIsModelModalVisible] = useState(false);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [isSwitchingModel, setIsSwitchingModel] = useState(false);
+  const [modelFeatures, setModelFeatures] = useState<GatewayFeatureFlags>({
+    canListModels: false,
+    canPatchSession: false,
+  });
 
   const cancelInitialScrollAnimation = useCallback(() => {
     if (initialScrollRafRef.current !== null) {
@@ -321,9 +363,68 @@ export function ChatScreen() {
     [appendAssistantMessage, scrollToBottom, setStreamingText],
   );
 
+  const loadModelCatalog = useCallback(async () => {
+    if (!modelFeatures.canListModels) {
+      return;
+    }
+    const service = modelsServiceRef.current;
+    if (!service) {
+      return;
+    }
+
+    setIsLoadingModels(true);
+    try {
+      const models = await service.listModels();
+      setModelOptions(models);
+      setModelUiError("");
+    } catch (error) {
+      setModelUiError(error instanceof Error ? error.message : "Failed to load model catalog");
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, [modelFeatures.canListModels]);
+
+  const openModelPicker = useCallback(async () => {
+    if (!modelFeatures.canListModels) {
+      setModelUiError("This gateway does not support models.list.");
+      return;
+    }
+    if (!modelFeatures.canPatchSession) {
+      setModelUiError("This gateway does not allow sessions.patch for model switching.");
+      return;
+    }
+    if (modelOptions.length === 0) {
+      await loadModelCatalog();
+    }
+    setIsModelModalVisible(true);
+  }, [loadModelCatalog, modelFeatures.canListModels, modelFeatures.canPatchSession, modelOptions]);
+
+  const selectModel = useCallback(
+    async (modelId: string) => {
+      const service = sessionsServiceRef.current;
+      if (!service || !sessionKey || isSwitchingModel) {
+        return;
+      }
+
+      setIsSwitchingModel(true);
+      setModelUiError("");
+      try {
+        await service.updateSessionModel(sessionKey, modelId);
+        setSelectedModelId(modelId);
+        setIsModelModalVisible(false);
+      } catch (error) {
+        setModelUiError(error instanceof Error ? error.message : "Failed to switch model");
+      } finally {
+        setIsSwitchingModel(false);
+      }
+    },
+    [isSwitchingModel, sessionKey],
+  );
+
   const initialize = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage("");
+    setModelUiError("");
     cancelInitialScrollAnimation();
     initialScrollPendingRef.current = false;
     initialScrollDoneRef.current = false;
@@ -373,10 +474,28 @@ export function ChatScreen() {
         setIdentity(nextIdentity);
       }
 
+      const features = readGatewayFeatureFlags(hello);
+      setModelFeatures(features);
+
       const service = new ChatService(client, { eventSource: client });
       chatServiceRef.current = service;
+      sessionsServiceRef.current = new SessionsService(client, store);
+      modelsServiceRef.current = new ModelsService(client);
       unsubscribeRef.current?.();
       unsubscribeRef.current = service.onChatEvent(onChatEvent, { sessionKey });
+
+      if (initialSessionModel) {
+        setSelectedModelId(initialSessionModel);
+      }
+      if (features.canListModels) {
+        try {
+          const models = await modelsServiceRef.current.listModels();
+          setModelOptions(models);
+        } catch (error) {
+          setModelUiError(error instanceof Error ? error.message : "Failed to load model catalog");
+          setModelOptions([]);
+        }
+      }
 
       const history = await service.getHistory({ sessionKey, limit: 200 });
       setMessages(mapHistoryMessages(history.messages));
@@ -388,7 +507,7 @@ export function ChatScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [cancelInitialScrollAnimation, onChatEvent, sessionKey, store]);
+  }, [cancelInitialScrollAnimation, initialSessionModel, onChatEvent, sessionKey, store]);
 
   const sendMessage = useCallback(async () => {
     const service = chatServiceRef.current;
@@ -459,6 +578,8 @@ export function ChatScreen() {
       clientRef.current?.disconnect();
       clientRef.current = null;
       chatServiceRef.current = null;
+      sessionsServiceRef.current = null;
+      modelsServiceRef.current = null;
     };
   }, [cancelInitialScrollAnimation, initialize]);
 
@@ -498,6 +619,12 @@ export function ChatScreen() {
           <View style={styles.errorCard}>
             <Text style={styles.errorTitle}>Chat Error</Text>
             <Text style={styles.errorBody}>{errorMessage}</Text>
+          </View>
+        ) : null}
+        {modelUiError ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorTitle}>Model Switch Error</Text>
+            <Text style={styles.errorBody}>{modelUiError}</Text>
           </View>
         ) : null}
 
@@ -541,9 +668,12 @@ export function ChatScreen() {
                   ]}
                 >
                   {isAssistant ? (
-                    <View style={[styles.avatar, styles.avatarAssistant]}>
+                    <Pressable
+                      style={[styles.avatar, styles.avatarAssistant]}
+                      onPress={() => void openModelPicker()}
+                    >
                       <Text style={styles.avatarText}>{initialsForRole(message.role)}</Text>
-                    </View>
+                    </Pressable>
                   ) : null}
                   <View
                     style={[
@@ -583,9 +713,12 @@ export function ChatScreen() {
 
             {streamText.trim().length > 0 ? (
               <View style={[styles.messageRow, styles.messageRowLeft]}>
-                <View style={[styles.avatar, styles.avatarAssistant]}>
+                <Pressable
+                  style={[styles.avatar, styles.avatarAssistant]}
+                  onPress={() => void openModelPicker()}
+                >
                   <Text style={styles.avatarText}>OC</Text>
-                </View>
+                </Pressable>
                 <View style={[styles.messageColumn, styles.messageColumnLeft]}>
                   <View style={styles.metaRow}>
                     <Text style={styles.metaAuthor}>OpenClaw</Text>
@@ -633,6 +766,63 @@ export function ChatScreen() {
           </View>
           <Text style={styles.disclaimer}>OpenClaw can make mistakes. Verify important info.</Text>
         </View>
+
+        <Modal
+          visible={isModelModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsModelModalVisible(false)}
+        >
+          <View style={styles.modalRoot}>
+            <Pressable style={styles.modalBackdrop} onPress={() => setIsModelModalVisible(false)} />
+            <View style={styles.modelSheet}>
+              <View style={styles.modelSheetHandle} />
+              <View style={styles.modelSheetHeader}>
+                <Text style={styles.modelSheetTitle}>Model</Text>
+                <Pressable
+                  style={styles.modelSheetCloseButton}
+                  onPress={() => setIsModelModalVisible(false)}
+                >
+                  <MaterialIcons name="close" size={22} color="#334155" />
+                </Pressable>
+              </View>
+              {isLoadingModels ? (
+                <View style={styles.modelSheetLoading}>
+                  <ActivityIndicator size="small" color="#38BDF8" />
+                  <Text style={styles.modelSheetLoadingText}>Loading models...</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={modelOptions}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={styles.modelListContent}
+                  ListEmptyComponent={
+                    <Text style={styles.modelEmptyText}>No models available from gateway.</Text>
+                  }
+                  renderItem={({ item }) => {
+                    const isSelected = selectedModelId === item.id;
+                    return (
+                      <Pressable
+                        style={[styles.modelListItem, isSelected ? styles.modelListItemSelected : null]}
+                        onPress={() => void selectModel(item.id)}
+                        disabled={isSwitchingModel}
+                      >
+                        <View style={styles.modelItemTextWrap}>
+                          <Text style={styles.modelItemName}>{item.name}</Text>
+                          <Text style={styles.modelItemMeta}>{item.provider}</Text>
+                        </View>
+                        {isSelected ? <MaterialIcons name="check" size={26} color="#0284C7" /> : null}
+                      </Pressable>
+                    );
+                  }}
+                />
+              )}
+              {isSwitchingModel ? (
+                <Text style={styles.modelSwitchingText}>Applying model...</Text>
+              ) : null}
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
       <StatusBar style="dark" />
     </SafeAreaView>
@@ -908,5 +1098,111 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
     fontFamily: "SpaceGrotesk_400Regular",
     fontSize: 10,
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15, 23, 42, 0.24)",
+  },
+  modelSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 24,
+    maxHeight: "78%",
+    borderTopWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  modelSheetHandle: {
+    width: 42,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#CBD5E1",
+    alignSelf: "center",
+    marginBottom: 10,
+  },
+  modelSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  modelSheetTitle: {
+    color: "#0F172A",
+    fontFamily: "SpaceGrotesk_700Bold",
+    fontSize: 22,
+  },
+  modelSheetCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  modelSheetLoading: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 16,
+  },
+  modelSheetLoadingText: {
+    color: "#64748B",
+    fontFamily: "SpaceGrotesk_400Regular",
+    fontSize: 12,
+  },
+  modelListContent: {
+    paddingBottom: 16,
+    gap: 8,
+  },
+  modelListItem: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  modelListItemSelected: {
+    borderColor: "#0284C7",
+    backgroundColor: "#F0F9FF",
+  },
+  modelItemTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  modelItemName: {
+    color: "#0F172A",
+    fontFamily: "SpaceGrotesk_700Bold",
+    fontSize: 15,
+  },
+  modelItemMeta: {
+    color: "#64748B",
+    fontFamily: "SpaceGrotesk_400Regular",
+    fontSize: 12,
+  },
+  modelEmptyText: {
+    color: "#64748B",
+    fontFamily: "SpaceGrotesk_400Regular",
+    fontSize: 13,
+    textAlign: "center",
+    paddingVertical: 12,
+  },
+  modelSwitchingText: {
+    color: "#0369A1",
+    fontFamily: "SpaceGrotesk_500Medium",
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 6,
   },
 });

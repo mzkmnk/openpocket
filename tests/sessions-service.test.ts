@@ -122,6 +122,25 @@ describe("SessionsService", () => {
     });
   });
 
+  // モデル更新時に sessions.patch を正規化パラメータで呼ぶこと
+  it("calls sessions.patch with normalized model values", async () => {
+    const requester = new MockRequester();
+    const store = new MemoryStore();
+    const service = new SessionsService(requester, store);
+
+    await service.updateSessionModel("s1", "  openai/gpt-5  ");
+    await service.updateSessionModel("s1", "   ");
+
+    expect(requester.calls[0]).toEqual({
+      method: "sessions.patch",
+      params: { key: "s1", model: "openai/gpt-5" },
+    });
+    expect(requester.calls[1]).toEqual({
+      method: "sessions.patch",
+      params: { key: "s1", model: null },
+    });
+  });
+
   // セッション新規初期化時に sessions.reset を reason:new で呼ぶこと
   it("calls sessions.reset with reason new", async () => {
     const requester = new MockRequester();

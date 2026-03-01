@@ -154,6 +154,23 @@ export class SessionsService {
   }
 
   /**
+   * Updates a session model through Gateway `sessions.patch`.
+   * Gateway `sessions.patch` を通じて session モデルを更新します。
+   *
+   * @param key - Session key to update.
+   *              更新対象の session key。
+   * @param model - Next model id. Empty string is normalized to `null`.
+   *                更新後のモデル ID。空文字は `null` に正規化されます。
+   * @returns Patch result from Gateway.
+   *          Gateway からの patch 結果。
+   */
+  async updateSessionModel(key: string, model: string | null): Promise<SessionsPatchResult> {
+    const normalizedModel = model === null ? null : model.trim().length === 0 ? null : model.trim();
+    const params: SessionsPatchParams = { key, model: normalizedModel };
+    return this.requester.request<SessionsPatchResult>("sessions.patch", params);
+  }
+
+  /**
    * Resets a session context through Gateway `sessions.reset`.
    * Gateway `sessions.reset` を通じて session コンテキストをリセットします。
    *
