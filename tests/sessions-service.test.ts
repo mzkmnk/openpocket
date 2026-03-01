@@ -90,6 +90,21 @@ describe("SessionsService", () => {
     expect(byLabel.map((session) => session.key)).toEqual(["session-beta"]);
   });
 
+  // ローカル保存ラベルを一覧表示へ優先適用できること
+  it("applies local labels over gateway labels in list results", async () => {
+    const requester = new MockRequester();
+    requester.listPayload = {
+      sessions: [{ key: "s-local", label: "Gateway Label", updatedAt: 1 }],
+    };
+    const store = new MemoryStore();
+    const service = new SessionsService(requester, store);
+
+    await service.setLocalSessionLabel("s-local", "  Local Label  ");
+    const sessions = await service.listSessions();
+
+    expect(sessions[0]?.label).toBe("Local Label");
+  });
+
   // ピン状態のトグル結果が永続化されること
   it("toggles and persists pinned keys", async () => {
     const requester = new MockRequester();

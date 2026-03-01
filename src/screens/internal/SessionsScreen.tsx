@@ -11,9 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import {
   ActivityIndicator,
-  Animated,
   FlatList,
-  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -22,13 +20,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
-import { AgentsService } from "../../core/agents/AgentsService";
-import type { GatewayAgentSummary } from "../../core/agents/types";
 import { GatewayClient } from "../../core/gateway/GatewayClient";
-import { useBottomSheetMotion } from "../../features/animation/useBottomSheetMotion";
 import { loadGatewayConnectionSecrets } from "../../core/security/connectionSecrets";
 import {
   loadOrCreateDeviceIdentity,
@@ -43,9 +38,6 @@ import type { RootStackParamList } from "../../router/types";
 
 type SessionsTab = "all" | "pinned" | "recent";
 type SessionsNavigationProp = NativeStackNavigationProp<RootStackParamList>;
-type GatewayFeatureFlags = {
-  canListAgents: boolean;
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -118,34 +110,6 @@ function colorForSession(key: string): { bg: string; fg: string } {
   return palette[hash % palette.length] ?? palette[0];
 }
 
-function createNewSessionKey(deviceId?: string): string {
-  const safeDeviceId = (deviceId ?? "mobile")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, "")
-    .slice(0, 12);
-  const timestampPart = Date.now().toString(36);
-  const randomPart = Math.random().toString(36).slice(2, 8);
-  return `${safeDeviceId}-${timestampPart}-${randomPart}`;
-}
-
-function readGatewayFeatureFlags(hello: unknown): GatewayFeatureFlags {
-  if (!isRecord(hello) || !isRecord(hello.features) || !Array.isArray(hello.features.methods)) {
-    return { canListAgents: false };
-  }
-
-  const methods = new Set(
-    hello.features.methods.filter((method): method is string => typeof method === "string"),
-  );
-  return { canListAgents: methods.has("agents.list") };
-}
-
-function toAgentDisplayName(agent: GatewayAgentSummary): string {
-  const preferred = agent.identity?.name ?? agent.name ?? agent.id;
-  const trimmed = preferred.trim();
-  return trimmed.length > 0 ? trimmed : agent.id;
-}
-
 export function SessionsScreen() {
   const navigation = useNavigation<SessionsNavigationProp>();
   const [fontsLoaded] = useFonts({
@@ -165,27 +129,9 @@ export function SessionsScreen() {
   const [errorMessage, setErrorMessage] = useState("");
   const [connectionDetail, setConnectionDetail] = useState("Connecting to gateway...");
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
-  const [editingSession, setEditingSession] = useState<SessionListItem | null>(null);
-  const [draftLabel, setDraftLabel] = useState("");
-  const [isSavingLabel, setIsSavingLabel] = useState(false);
-  const [isCreatingSession, setIsCreatingSession] = useState(false);
-  const [canListAgents, setCanListAgents] = useState(false);
-  const [agentsMainKey, setAgentsMainKey] = useState("main");
-  const [defaultAgentId, setDefaultAgentId] = useState("");
-  const [availableAgents, setAvailableAgents] = useState<GatewayAgentSummary[]>([]);
-  const [isAgentPickerVisible, setIsAgentPickerVisible] = useState(false);
 
   const clientRef = useRef<GatewayClient | null>(null);
   const serviceRef = useRef<SessionsService | null>(null);
-  const agentsServiceRef = useRef<AgentsService | null>(null);
-  const createRunLockRef = useRef(false);
-  const {
-    translateY: agentSheetTranslateY,
-    backdropOpacity: agentBackdropOpacity,
-    setClosedPosition: setAgentSheetClosedPosition,
-    animateIn: animateAgentPickerIn,
-    animateOut: animateAgentPickerOut,
-  } = useBottomSheetMotion({ closedY: 420 });
 
   const refreshSessions = useCallback(
     async (useRefreshingState: boolean): Promise<SessionListItem[]> => {
@@ -221,20 +167,6 @@ export function SessionsScreen() {
     },
     [activeSessionKey],
   );
-
-  const beginCreateRun = useCallback((): boolean => {
-    if (createRunLockRef.current) {
-      return false;
-    }
-    createRunLockRef.current = true;
-    setIsCreatingSession(true);
-    return true;
-  }, []);
-
-  const endCreateRun = useCallback(() => {
-    createRunLockRef.current = false;
-    setIsCreatingSession(false);
-  }, []);
 
   const initialize = useCallback(async () => {
     setIsLoading(true);
@@ -277,27 +209,6 @@ export function SessionsScreen() {
       }
 
       serviceRef.current = new SessionsService(client, store);
-      const features = readGatewayFeatureFlags(hello);
-      setCanListAgents(features.canListAgents);
-      if (features.canListAgents) {
-        agentsServiceRef.current = new AgentsService(client);
-        try {
-          const result = await agentsServiceRef.current.listAgents();
-          setAgentsMainKey(result.mainKey);
-          setDefaultAgentId(result.defaultId);
-          setAvailableAgents(result.agents);
-        } catch {
-          setAgentsMainKey("main");
-          setDefaultAgentId("");
-          setAvailableAgents([]);
-        }
-      } else {
-        agentsServiceRef.current = null;
-        setAgentsMainKey("main");
-        setDefaultAgentId("");
-        setAvailableAgents([]);
-      }
-
       await refreshSessions(false);
       setConnectionDetail("Connected");
     } catch (error) {
@@ -313,9 +224,30 @@ export function SessionsScreen() {
       clientRef.current?.disconnect();
       clientRef.current = null;
       serviceRef.current = null;
-      agentsServiceRef.current = null;
     };
   }, [initialize]);
+
+  const refreshSessionsSilently = useCallback(async () => {
+    const service = serviceRef.current;
+    if (!service) {
+      return;
+    }
+    try {
+      const result = await service.listSessions();
+      setAllSessions(result);
+      if (result.length > 0 && !activeSessionKey) {
+        setActiveSessionKey(result[0]?.key ?? "");
+      }
+    } catch {
+      // Keep current list when background refresh fails.
+    }
+  }, [activeSessionKey]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshSessionsSilently();
+    }, [refreshSessionsSilently]),
+  );
 
   const filteredSessions = useMemo(() => {
     const normalizedSearch = searchText.trim().toLowerCase();
@@ -350,158 +282,12 @@ export function SessionsScreen() {
     [refreshSessions],
   );
 
-  const onOpenEdit = useCallback((item: SessionListItem) => {
-    setEditingSession(item);
-    setDraftLabel(item.label);
-  }, []);
-
-  const onSaveLabel = useCallback(async () => {
-    const service = serviceRef.current;
-    if (!service || !editingSession) {
-      return;
-    }
-    setIsSavingLabel(true);
-    try {
-      await service.updateSessionLabel(editingSession.key, draftLabel);
-      setEditingSession(null);
-      setDraftLabel("");
-      await refreshSessions(true);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to update label");
-    } finally {
-      setIsSavingLabel(false);
-    }
-  }, [draftLabel, editingSession, refreshSessions]);
-
-  const closeAgentPicker = useCallback(() => {
-    animateAgentPickerOut(() => {
-      setIsAgentPickerVisible(false);
-      setAgentSheetClosedPosition();
-    });
-  }, [animateAgentPickerOut, setAgentSheetClosedPosition]);
-
-  const openChatForSession = useCallback(
-    (sessionKey: string, sessionLabel: string, sessionModel: string) => {
-      setActiveSessionKey(sessionKey);
-      navigation.navigate("internal/chat", {
-        sessionKey,
-        sessionLabel,
-        sessionModel,
-      });
-    },
-    [navigation],
-  );
-
-  const onCreateSession = useCallback(async () => {
-    const service = serviceRef.current;
-    if (!service) {
-      return;
-    }
-
-    if (!beginCreateRun()) {
-      return;
-    }
-    setErrorMessage("");
-    try {
-      const provisionalKey = createNewSessionKey(identity?.deviceId);
-      const resetResult = await service.resetSession(provisionalKey, "new");
-      const nextKey =
-        typeof resetResult.key === "string" && resetResult.key.trim().length > 0
-          ? resetResult.key
-          : provisionalKey;
-
-      const refreshed = await refreshSessions(true);
-      const target =
-        refreshed.find((item) => item.key === nextKey) ??
-        refreshed.find((item) => item.key === provisionalKey);
-      const resolvedKey = target?.key ?? nextKey;
-      const resolvedLabel = target?.label ?? "New Session";
-      openChatForSession(resolvedKey, resolvedLabel, target?.row.model ?? "");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to create session");
-    } finally {
-      endCreateRun();
-    }
-  }, [beginCreateRun, endCreateRun, identity?.deviceId, openChatForSession, refreshSessions]);
-
-  const onCreateSessionForAgent = useCallback(
-    async (agent: GatewayAgentSummary) => {
-      const service = serviceRef.current;
-      if (!service) {
-        return;
-      }
-
-      if (!beginCreateRun()) {
-        return;
-      }
-      setErrorMessage("");
-      closeAgentPicker();
-
-      try {
-        const sessionKey = `agent:${agent.id}:${agentsMainKey}`;
-        const resetResult = await service.resetSession(sessionKey, "new");
-        const nextKey =
-          typeof resetResult.key === "string" && resetResult.key.trim().length > 0
-            ? resetResult.key
-            : sessionKey;
-        const refreshed = await refreshSessions(true);
-        const target = refreshed.find((item) => item.key === nextKey);
-        const sessionLabel = target?.label ?? toAgentDisplayName(agent);
-        openChatForSession(nextKey, sessionLabel, target?.row.model ?? "");
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Failed to open agent session");
-      } finally {
-        endCreateRun();
-      }
-    },
-    [
-      agentsMainKey,
-      beginCreateRun,
-      closeAgentPicker,
-      endCreateRun,
-      openChatForSession,
-      refreshSessions,
-    ],
-  );
-
   const onPressNew = useCallback(() => {
-    if (createRunLockRef.current || isCreatingSession || isLoading) {
+    if (isLoading) {
       return;
     }
-
-    if (!canListAgents) {
-      void onCreateSession();
-      return;
-    }
-
-    if (availableAgents.length === 1) {
-      const target = availableAgents[0];
-      if (target) {
-        void onCreateSessionForAgent(target);
-        return;
-      }
-    }
-
-    if (availableAgents.length > 1) {
-      setIsAgentPickerVisible(true);
-      setAgentSheetClosedPosition();
-      requestAnimationFrame(() => {
-        animateAgentPickerIn();
-      });
-      return;
-    }
-
-    void onCreateSession();
-  }, [
-    availableAgents,
-    canListAgents,
-    isCreatingSession,
-    isLoading,
-    onCreateSession,
-    onCreateSessionForAgent,
-    animateAgentPickerIn,
-    setAgentSheetClosedPosition,
-  ]);
+    navigation.navigate("internal/session-create");
+  }, [isLoading, navigation]);
 
   if (!fontsLoaded) {
     return null;
@@ -647,9 +433,6 @@ export function SessionsScreen() {
                       color={item.pinned ? "#F59E0B" : "#94A3B8"}
                     />
                   </Pressable>
-                  <Pressable style={styles.iconAction} onPress={() => onOpenEdit(item)}>
-                    <MaterialIcons name="edit" size={16} color="#94A3B8" />
-                  </Pressable>
                 </View>
               </View>
             );
@@ -658,107 +441,12 @@ export function SessionsScreen() {
       )}
 
       <Pressable
-        style={[
-          styles.floatingNewButton,
-          isCreatingSession || isLoading ? styles.floatingNewButtonDisabled : null,
-        ]}
+        style={[styles.floatingNewButton, isLoading ? styles.floatingNewButtonDisabled : null]}
         onPress={onPressNew}
-        disabled={isCreatingSession || isLoading}
+        disabled={isLoading}
       >
-        {isCreatingSession ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
-        ) : (
-          <MaterialIcons name="add" size={22} color="#FFFFFF" />
-        )}
+        <MaterialIcons name="add" size={22} color="#FFFFFF" />
       </Pressable>
-
-      <Modal
-        visible={Boolean(editingSession)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditingSession(null)}
-      >
-        <View style={styles.modalRoot}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setEditingSession(null)} />
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Edit session label</Text>
-            <Text style={styles.modalBody}>Give your session a memorable name.</Text>
-            <TextInput
-              value={draftLabel}
-              onChangeText={setDraftLabel}
-              placeholder="Label name"
-              placeholderTextColor="#94A3B8"
-              style={styles.modalInput}
-              autoFocus
-            />
-            <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalButton, styles.modalCancelButton]}
-                onPress={() => setEditingSession(null)}
-                disabled={isSavingLabel}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButton, styles.modalSaveButton]}
-                onPress={() => void onSaveLabel()}
-                disabled={isSavingLabel}
-              >
-                <Text style={styles.modalSaveText}>
-                  {isSavingLabel ? "Saving..." : "Save Changes"}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={isAgentPickerVisible}
-        transparent
-        animationType="none"
-        onRequestClose={() => closeAgentPicker()}
-      >
-        <View style={styles.modalRoot}>
-          <Animated.View style={[styles.modalBackdrop, { opacity: agentBackdropOpacity }]}>
-            <Pressable style={styles.modalBackdropPressable} onPress={() => closeAgentPicker()} />
-          </Animated.View>
-          <Animated.View
-            style={[
-              styles.modalSheet,
-              {
-                transform: [{ translateY: agentSheetTranslateY }],
-              },
-            ]}
-          >
-            <Text style={styles.modalTitle}>Choose Agent</Text>
-            <Text style={styles.modalBody}>Select the agent to start this chat with.</Text>
-            <View style={styles.agentListWrap}>
-              {availableAgents.map((agent) => {
-                const isDefault = agent.id === defaultAgentId;
-                return (
-                  <Pressable
-                    key={agent.id}
-                    style={styles.agentItem}
-                    onPress={() => void onCreateSessionForAgent(agent)}
-                    disabled={isCreatingSession}
-                  >
-                    <View style={styles.agentLabelWrap}>
-                      <Text style={styles.agentName} numberOfLines={1}>
-                        {toAgentDisplayName(agent)}
-                      </Text>
-                      <Text style={styles.agentId} numberOfLines={1}>
-                        {agent.id}
-                      </Text>
-                    </View>
-                    {isDefault ? <Text style={styles.agentDefaultBadge}>Default</Text> : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-          </Animated.View>
-        </View>
-      </Modal>
 
       <StatusBar style="dark" />
     </SafeAreaView>
@@ -1039,118 +727,5 @@ const styles = StyleSheet.create({
   },
   floatingNewButtonDisabled: {
     opacity: 0.6,
-  },
-  modalRoot: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(15, 23, 42, 0.4)",
-  },
-  modalBackdropPressable: {
-    flex: 1,
-  },
-  modalSheet: {
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 30,
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
-  },
-  modalTitle: {
-    color: "#0F172A",
-    fontSize: 20,
-    fontFamily: "SpaceGrotesk_700Bold",
-  },
-  modalBody: {
-    marginTop: 3,
-    color: "#64748B",
-    fontSize: 13,
-    fontFamily: "SpaceGrotesk_400Regular",
-  },
-  modalInput: {
-    marginTop: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    backgroundColor: "#F8FAFC",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    color: "#0F172A",
-    fontSize: 14,
-    fontFamily: "SpaceGrotesk_400Regular",
-  },
-  modalActions: {
-    marginTop: 14,
-    flexDirection: "row",
-    gap: 10,
-  },
-  modalButton: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-    paddingVertical: 12,
-  },
-  modalCancelButton: {
-    backgroundColor: "#F1F5F9",
-  },
-  modalCancelText: {
-    color: "#475569",
-    fontFamily: "SpaceGrotesk_700Bold",
-    fontSize: 13,
-  },
-  modalSaveButton: {
-    backgroundColor: "#137FEC",
-  },
-  modalSaveText: {
-    color: "#FFFFFF",
-    fontFamily: "SpaceGrotesk_700Bold",
-    fontSize: 13,
-  },
-  agentListWrap: {
-    marginTop: 14,
-    gap: 8,
-  },
-  agentItem: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    backgroundColor: "#F8FAFC",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  agentLabelWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  agentName: {
-    color: "#0F172A",
-    fontFamily: "SpaceGrotesk_700Bold",
-    fontSize: 14,
-  },
-  agentId: {
-    marginTop: 2,
-    color: "#64748B",
-    fontFamily: "SpaceGrotesk_400Regular",
-    fontSize: 12,
-  },
-  agentDefaultBadge: {
-    color: "#0B61C0",
-    backgroundColor: "#DBEAFE",
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    overflow: "hidden",
-    fontFamily: "SpaceGrotesk_700Bold",
-    fontSize: 11,
   },
 });

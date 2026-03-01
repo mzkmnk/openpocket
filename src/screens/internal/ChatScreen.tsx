@@ -4,7 +4,7 @@ import {
   SpaceGrotesk_700Bold,
   useFonts,
 } from "@expo-google-fonts/space-grotesk";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Crypto from "expo-crypto";
@@ -16,10 +16,8 @@ import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import {
   ActivityIndicator,
   Animated,
-  Dimensions,
   Easing,
   FlatList,
-  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -37,6 +35,7 @@ import { GatewayClient } from "../../core/gateway/GatewayClient";
 import { ModelsService } from "../../core/models/ModelsService";
 import type { ModelChoice } from "../../core/models/types";
 import { useBottomSheetMotion } from "../../features/animation/useBottomSheetMotion";
+import { useKeyboardDockedOffset } from "../../features/animation/useKeyboardDockedOffset";
 import { loadGatewayConnectionSecrets } from "../../core/security/connectionSecrets";
 import {
   loadOrCreateDeviceIdentity,
@@ -535,20 +534,23 @@ export function ChatScreen() {
   const [connectionDetail, setConnectionDetail] = useState("Connecting to gateway...");
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
   const [modelOptions, setModelOptions] = useState<ModelChoice[]>([]);
+  const [resolvedSessionLabel, setResolvedSessionLabel] = useState(sessionLabel);
   const [selectedModelId, setSelectedModelId] = useState(initialSessionModel);
   const [modelUiError, setModelUiError] = useState("");
   const [isModelModalVisible, setIsModelModalVisible] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isSwitchingModel, setIsSwitchingModel] = useState(false);
   const [footerHeight, setFooterHeight] = useState(84);
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [inputHeight, setInputHeight] = useState(INPUT_SINGLE_HEIGHT);
   const [modelFeatures, setModelFeatures] = useState<GatewayFeatureFlags>({
     canListModels: false,
     canPatchSession: false,
   });
+
+  useEffect(() => {
+    setResolvedSessionLabel(sessionLabel);
+  }, [sessionLabel, sessionKey]);
   const streamSubPulse = useRef(new Animated.Value(0)).current;
-  const keyboardOffsetAnimated = useRef(new Animated.Value(0)).current;
   const {
     translateY: modelSheetTranslateY,
     backdropOpacity: modelBackdropOpacity,
@@ -573,7 +575,6 @@ export function ChatScreen() {
     }),
     [streamSubPulse],
   );
-  const isKeyboardVisible = keyboardOffset > 0;
   const inferInputHeight = useCallback((text: string): number => {
     const lineCount = Math.max(1, text.split(/\r\n|\r|\n/).length);
     const inferredHeight = INPUT_SINGLE_HEIGHT + (lineCount - 1) * INPUT_LINE_HEIGHT;
@@ -655,24 +656,15 @@ export function ChatScreen() {
     [cancelFollowScrollAnimation],
   );
 
-  const updateKeyboardOffset = useCallback(
-    (next: number, durationMs?: number) => {
-      const normalized = Math.max(0, next);
-      setKeyboardOffset(normalized);
-      Animated.timing(keyboardOffsetAnimated, {
-        toValue: normalized,
-        duration: typeof durationMs === "number" ? Math.max(80, durationMs) : 180,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
+  const { keyboardOffset, keyboardOffsetAnimated, isKeyboardVisible } = useKeyboardDockedOffset({
+    onOffsetChange: (_offset, durationMs) => {
       if (isAtBottomRef.current) {
         requestAnimationFrame(() => {
           scrollToBottomSmooth(durationMs);
         });
       }
     },
-    [keyboardOffsetAnimated, scrollToBottomSmooth],
-  );
+  });
 
   const maybeRunInitialScroll = useCallback(() => {
     if (
@@ -792,65 +784,6 @@ export function ChatScreen() {
     }
     setInputHeight(inferInputHeight(draft));
   }, [draft, inferInputHeight, isKeyboardVisible]);
-
-  useEffect(() => {
-    const screenHeight = Dimensions.get("window").height;
-
-    const computeKeyboardHeight = (screenY?: number, fallbackHeight?: number): number => {
-      if (typeof screenY === "number") {
-        return Math.max(0, screenHeight - screenY);
-      }
-      if (typeof fallbackHeight === "number") {
-        return Math.max(0, fallbackHeight);
-      }
-      return 0;
-    };
-
-    if (Platform.OS === "ios") {
-      const showSub = Keyboard.addListener("keyboardWillShow", (event) => {
-        Keyboard.scheduleLayoutAnimation(event);
-        const height = computeKeyboardHeight(
-          event.endCoordinates?.screenY,
-          event.endCoordinates?.height,
-        );
-        updateKeyboardOffset(height, event.duration);
-      });
-      const changeSub = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
-        Keyboard.scheduleLayoutAnimation(event);
-        const height = computeKeyboardHeight(
-          event.endCoordinates?.screenY,
-          event.endCoordinates?.height,
-        );
-        updateKeyboardOffset(height, event.duration);
-      });
-      const hideSub = Keyboard.addListener("keyboardWillHide", (event) => {
-        Keyboard.scheduleLayoutAnimation(event);
-        updateKeyboardOffset(0, event.duration);
-      });
-
-      return () => {
-        showSub.remove();
-        changeSub.remove();
-        hideSub.remove();
-      };
-    }
-
-    const showSub = Keyboard.addListener("keyboardDidShow", (event) => {
-      const height = computeKeyboardHeight(
-        event.endCoordinates?.screenY,
-        event.endCoordinates?.height,
-      );
-      updateKeyboardOffset(height, 120);
-    });
-    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
-      updateKeyboardOffset(0, 120);
-    });
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, [updateKeyboardOffset]);
 
   const onChatEvent = useCallback(
     (payload: ChatEventPayload) => {
@@ -994,6 +927,22 @@ export function ChatScreen() {
     [closeModelPicker, isSwitchingModel, sessionKey],
   );
 
+  const refreshSessionLabel = useCallback(async () => {
+    const service = sessionsServiceRef.current;
+    if (!service || !sessionKey) {
+      return;
+    }
+    try {
+      const sessions = await service.listSessions();
+      const target = sessions.find((item) => item.key === sessionKey);
+      if (target?.label.trim()) {
+        setResolvedSessionLabel(target.label);
+      }
+    } catch {
+      // Keep current title if reload fails.
+    }
+  }, [sessionKey]);
+
   const initialize = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage("");
@@ -1061,6 +1010,7 @@ export function ChatScreen() {
       if (initialSessionModel) {
         setSelectedModelId(initialSessionModel);
       }
+      void refreshSessionLabel();
       if (features.canListModels) {
         try {
           const models = await modelsServiceRef.current.listModels();
@@ -1085,10 +1035,17 @@ export function ChatScreen() {
     cancelInitialScrollAnimation,
     initialSessionModel,
     onChatEvent,
+    refreshSessionLabel,
     sessionKey,
     setLiveStatus,
     store,
   ]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshSessionLabel();
+    }, [refreshSessionLabel]),
+  );
 
   const sendMessage = useCallback(async () => {
     const service = chatServiceRef.current;
@@ -1184,7 +1141,7 @@ export function ChatScreen() {
           </Pressable>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {sessionLabel}
+              {resolvedSessionLabel}
             </Text>
             <View style={styles.statusRow}>
               <View style={styles.onlineDot} />
@@ -1194,7 +1151,20 @@ export function ChatScreen() {
               </Text>
             </View>
           </View>
-          <View style={styles.headerIconSpacer} />
+          <Pressable
+            style={styles.headerIconButton}
+            onPress={() => {
+              if (!sessionKey) {
+                return;
+              }
+              navigation.navigate("internal/session-settings", {
+                sessionKey,
+                sessionLabel: resolvedSessionLabel,
+              });
+            }}
+          >
+            <MaterialIcons name="settings" size={18} color="#0F172A" />
+          </Pressable>
         </View>
 
         {errorMessage ? (

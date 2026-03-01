@@ -14,4 +14,9 @@ export type RootStackParamList = {
     sessionLabel?: string;
     sessionModel?: string;
   };
+  "internal/session-settings": {
+    sessionKey: string;
+    sessionLabel?: string;
+  };
+  "internal/session-create": undefined;
 };
