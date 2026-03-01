@@ -164,7 +164,10 @@ export class SessionsService {
    * @returns Reset result from Gateway.
    *          Gateway からの reset 結果。
    */
-  async resetSession(key: string, reason: SessionsResetReason = "reset"): Promise<SessionsResetResult> {
+  async resetSession(
+    key: string,
+    reason: SessionsResetReason = "reset",
+  ): Promise<SessionsResetResult> {
     const params: SessionsResetParams = { key, reason };
     return this.requester.request<SessionsResetResult>("sessions.reset", params);
   }
