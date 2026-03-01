@@ -23,7 +23,11 @@ function isModelChoice(value: unknown): value is ModelChoice {
 }
 
 function toListResult(payload: unknown): ModelsListResult {
-  if (!isRecord(payload) || !Array.isArray(payload.models) || !payload.models.every(isModelChoice)) {
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.models) ||
+    !payload.models.every(isModelChoice)
+  ) {
     throw new Error("Invalid models.list response payload");
   }
   return payload as ModelsListResult;

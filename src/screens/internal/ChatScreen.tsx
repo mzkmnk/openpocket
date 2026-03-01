@@ -838,10 +838,7 @@ export function ChatScreen() {
             >
               <View style={styles.modelSheetHeader}>
                 <Text style={styles.modelSheetTitle}>Model</Text>
-                <Pressable
-                  style={styles.modelSheetCloseButton}
-                  onPress={() => closeModelPicker()}
-                >
+                <Pressable style={styles.modelSheetCloseButton} onPress={() => closeModelPicker()}>
                   <MaterialIcons name="close" size={16} color="#334155" />
                 </Pressable>
               </View>
@@ -862,7 +859,10 @@ export function ChatScreen() {
                     const isSelected = selectedModelId === item.id;
                     return (
                       <Pressable
-                        style={[styles.modelListItem, isSelected ? styles.modelListItemSelected : null]}
+                        style={[
+                          styles.modelListItem,
+                          isSelected ? styles.modelListItemSelected : null,
+                        ]}
                         onPress={() => void selectModel(item.id)}
                         disabled={isSwitchingModel}
                       >
@@ -870,7 +870,9 @@ export function ChatScreen() {
                           <Text style={styles.modelItemName}>{item.name}</Text>
                           <Text style={styles.modelItemMeta}>{item.provider}</Text>
                         </View>
-                        {isSelected ? <MaterialIcons name="check" size={20} color="#0284C7" /> : null}
+                        {isSelected ? (
+                          <MaterialIcons name="check" size={20} color="#0284C7" />
+                        ) : null}
                       </Pressable>
                     );
                   }}
