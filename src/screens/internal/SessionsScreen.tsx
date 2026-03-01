@@ -513,20 +513,15 @@ export function SessionsScreen() {
         <Text style={styles.title}>Sessions</Text>
         <View style={styles.headerActions}>
           <Pressable
-            style={[styles.refreshButton, styles.newButton]}
-            onPress={onPressNew}
-            disabled={isCreatingSession || isLoading}
-          >
-            <Text style={[styles.refreshButtonText, styles.newButtonText]}>
-              {isCreatingSession ? "..." : "New"}
-            </Text>
-          </Pressable>
-          <Pressable
-            style={styles.refreshButton}
+            style={styles.headerIconButton}
             onPress={() => void refreshSessions(true)}
             disabled={isRefreshing || isLoading}
           >
-            <Text style={styles.refreshButtonText}>{isRefreshing ? "..." : "Refresh"}</Text>
+            {isRefreshing ? (
+              <ActivityIndicator size="small" color="#137FEC" />
+            ) : (
+              <MaterialIcons name="refresh" size={20} color="#334155" />
+            )}
           </Pressable>
         </View>
       </View>
@@ -662,6 +657,21 @@ export function SessionsScreen() {
         />
       )}
 
+      <Pressable
+        style={[
+          styles.floatingNewButton,
+          isCreatingSession || isLoading ? styles.floatingNewButtonDisabled : null,
+        ]}
+        onPress={onPressNew}
+        disabled={isCreatingSession || isLoading}
+      >
+        {isCreatingSession ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <MaterialIcons name="add" size={22} color="#FFFFFF" />
+        )}
+      </Pressable>
+
       <Modal
         visible={Boolean(editingSession)}
         transparent
@@ -779,25 +789,15 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     color: "#0F172A",
   },
-  refreshButton: {
+  headerIconButton: {
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    borderRadius: 12,
+    width: 40,
+    height: 40,
     backgroundColor: "#F8FAFC",
-  },
-  newButton: {
-    borderColor: "#137FEC",
-    backgroundColor: "#EFF6FF",
-  },
-  refreshButtonText: {
-    fontFamily: "SpaceGrotesk_500Medium",
-    fontSize: 12,
-    color: "#334155",
-  },
-  newButtonText: {
-    color: "#0B61C0",
+    alignItems: "center",
+    justifyContent: "center",
   },
   connectionText: {
     paddingHorizontal: 16,
@@ -906,7 +906,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingTop: 6,
-    paddingBottom: 16,
+    paddingBottom: 92,
     gap: 8,
   },
   list: {
@@ -1020,6 +1020,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#334155",
     fontFamily: "SpaceGrotesk_700Bold",
+  },
+  floatingNewButton: {
+    position: "absolute",
+    right: 20,
+    bottom: 26,
+    width: 50,
+    height: 50,
+    borderRadius: 999,
+    backgroundColor: "#137FEC",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0B61C0",
+    shadowOpacity: 0.26,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  floatingNewButtonDisabled: {
+    opacity: 0.6,
   },
   modalRoot: {
     flex: 1,
