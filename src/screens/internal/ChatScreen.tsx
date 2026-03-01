@@ -53,6 +53,7 @@ type UiMessage = {
   role: "assistant" | "user";
   body: string;
   time: string;
+  activityStatus?: string;
 };
 
 type GatewayFeatureFlags = {
@@ -128,23 +129,167 @@ function extractTextFromUnknown(value: unknown): string {
   return "";
 }
 
+function isSupportedHistoryRole(value: unknown): value is UiMessage["role"] | "toolResult" {
+  return value === "assistant" || value === "user" || value === "toolResult";
+}
+
+function resolveHistoryMessageRecord(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (isRecord(value.message)) {
+    return value.message;
+  }
+  return value;
+}
+
+function extractDisplayTextFromContent(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (!Array.isArray(value)) {
+    return extractTextFromUnknown(value).trim();
+  }
+
+  const chunks = value
+    .map((item) => {
+      if (!isRecord(item)) {
+        return extractTextFromUnknown(item);
+      }
+
+      if (typeof item.type === "string") {
+        if (item.type === "text") {
+          return typeof item.text === "string" ? item.text : "";
+        }
+        return "";
+      }
+
+      return extractTextFromUnknown(item);
+    })
+    .filter((item) => item.trim().length > 0);
+
+  return chunks.join("\n").trim();
+}
+
+function resolveLiveStatusFromContent(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  let hasActivity = false;
+  let hasThinking = false;
+  let hasToolResult = false;
+  let hasText = false;
+
+  value.forEach((item) => {
+    if (!isRecord(item) || typeof item.type !== "string") {
+      return;
+    }
+
+    if (item.type === "thinking") {
+      hasThinking = true;
+      hasActivity = true;
+      return;
+    }
+
+    if (item.type === "toolCall") {
+      hasActivity = true;
+      return;
+    }
+
+    if (item.type === "toolResult") {
+      hasToolResult = true;
+      hasActivity = true;
+      return;
+    }
+
+    if (item.type === "text") {
+      const text = typeof item.text === "string" ? item.text : "";
+      if (text.trim().length > 0) {
+        hasText = true;
+      }
+      return;
+    }
+
+    const text = extractTextFromUnknown(item);
+    if (text.trim().length > 0) {
+      hasText = true;
+    }
+  });
+
+  if (hasText) {
+    return "chatting...";
+  }
+  if (hasActivity || hasThinking || hasToolResult) {
+    return "thinking...";
+  }
+  return "";
+}
+
+function resolveStatusFromToolResultRecord(record: Record<string, unknown>): string {
+  const details = isRecord(record.details) ? record.details : null;
+  const status = typeof details?.status === "string" ? details.status : "";
+
+  if (status === "running" || status === "completed" || status === "failed") {
+    return "thinking...";
+  }
+  return "thinking...";
+}
+
+function resolveContentField(record: Record<string, unknown>): unknown {
+  if (Array.isArray(record.content)) {
+    return record.content;
+  }
+  if (Array.isArray(record.parts)) {
+    return record.parts;
+  }
+  if (isRecord(record.message) && Array.isArray(record.message.content)) {
+    return record.message.content;
+  }
+  if (isRecord(record.message) && Array.isArray(record.message.parts)) {
+    return record.message.parts;
+  }
+  return record.content ?? record.parts ?? record.message ?? record;
+}
+
 function mapHistoryMessages(messages: unknown[]): UiMessage[] {
-  return messages
+  const parsed = messages
     .map((message, index) => {
-      if (!isRecord(message)) {
+      const record = resolveHistoryMessageRecord(message);
+      if (!record || !isSupportedHistoryRole(record.role)) {
         return null;
       }
 
-      const role = message.role === "assistant" ? "assistant" : "user";
-      const body = extractTextFromUnknown(message);
+      if (record.role === "toolResult") {
+        const createdAt =
+          typeof record.createdAt === "number"
+            ? record.createdAt
+            : typeof record.timestamp === "number"
+              ? record.timestamp
+              : undefined;
+        const activityStatus = resolveStatusFromToolResultRecord(record);
+        return {
+          id: `history-${index}`,
+          role: "assistant",
+          body: "",
+          time: formatTime(createdAt),
+          activityStatus,
+        } satisfies UiMessage;
+      }
+
+      const role = record.role;
+      const content = resolveContentField(record);
+      const body = extractDisplayTextFromContent(content);
+      const liveStatus = role === "assistant" ? resolveLiveStatusFromContent(content) : "";
+      const activityStatus = liveStatus === "thinking..." ? liveStatus : "";
       const createdAt =
-        typeof message.createdAt === "number"
-          ? message.createdAt
-          : typeof message.timestamp === "number"
-            ? message.timestamp
+        typeof record.createdAt === "number"
+          ? record.createdAt
+          : typeof record.timestamp === "number"
+            ? record.timestamp
             : undefined;
 
-      if (body.trim().length === 0) {
+      if (body.trim().length === 0 && activityStatus.length === 0) {
         return null;
       }
 
@@ -153,9 +298,56 @@ function mapHistoryMessages(messages: unknown[]): UiMessage[] {
         role,
         body: body.trim(),
         time: formatTime(createdAt),
+        ...(activityStatus ? { activityStatus } : {}),
       } satisfies UiMessage;
     })
     .filter((message): message is UiMessage => message !== null);
+
+  const compacted: UiMessage[] = [];
+  let index = 0;
+
+  while (index < parsed.length) {
+    const current = parsed[index];
+    if (!current) {
+      index += 1;
+      continue;
+    }
+
+    const isAssistantActivityOnly =
+      current.role === "assistant" &&
+      current.body.trim().length === 0 &&
+      typeof current.activityStatus === "string";
+    if (!isAssistantActivityOnly) {
+      compacted.push(current);
+      index += 1;
+      continue;
+    }
+
+    let end = index;
+    while (end + 1 < parsed.length) {
+      const next = parsed[end + 1];
+      if (
+        next.role === "assistant" &&
+        next.body.trim().length === 0 &&
+        typeof next.activityStatus === "string"
+      ) {
+        end += 1;
+        continue;
+      }
+      break;
+    }
+
+    const nextAfterBlock = parsed[end + 1];
+    const hasImmediateAssistantTextAfterBlock =
+      nextAfterBlock?.role === "assistant" && nextAfterBlock.body.trim().length > 0;
+
+    if (!hasImmediateAssistantTextAfterBlock) {
+      compacted.push(parsed[end]);
+    }
+    index = end + 1;
+  }
+
+  return compacted;
 }
 
 function initialsForRole(role: UiMessage["role"]): string {
@@ -201,6 +393,7 @@ export function ChatScreen() {
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const streamTextRef = useRef("");
+  const streamStatusRef = useRef("");
   const messagesScrollRef = useRef<ScrollView | null>(null);
   const initialScrollPendingRef = useRef(false);
   const initialScrollRunningRef = useRef(false);
@@ -212,6 +405,7 @@ export function ChatScreen() {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [streamText, setStreamText] = useState("");
+  const [streamStatus, setStreamStatus] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -228,6 +422,7 @@ export function ChatScreen() {
     canListModels: false,
     canPatchSession: false,
   });
+  const streamSubPulse = useRef(new Animated.Value(0)).current;
   const modelSheetTranslateY = useRef(new Animated.Value(MODEL_SHEET_CLOSED_Y)).current;
   const modelBackdropOpacity = useMemo(
     () =>
@@ -237,6 +432,23 @@ export function ChatScreen() {
         extrapolate: "clamp",
       }),
     [modelSheetTranslateY],
+  );
+  const streamSubAnimatedStyle = useMemo(
+    () => ({
+      opacity: streamSubPulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.72, 1],
+      }),
+      transform: [
+        {
+          translateY: streamSubPulse.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, -1.5],
+          }),
+        },
+      ],
+    }),
+    [streamSubPulse],
   );
 
   const animateModelModalIn = useCallback(() => {
@@ -341,6 +553,11 @@ export function ChatScreen() {
     setStreamText(next);
   }, []);
 
+  const setLiveStatus = useCallback((next: string) => {
+    streamStatusRef.current = next;
+    setStreamStatus(next);
+  }, []);
+
   const appendAssistantMessage = useCallback((body: string) => {
     const normalized = body.trim();
     if (normalized.length === 0) {
@@ -357,16 +574,64 @@ export function ChatScreen() {
     ]);
   }, []);
 
+  useEffect(() => {
+    if (streamStatus.trim().length === 0) {
+      streamSubPulse.stopAnimation();
+      streamSubPulse.setValue(0);
+      return;
+    }
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(streamSubPulse, {
+          toValue: 1,
+          duration: 600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(streamSubPulse, {
+          toValue: 0,
+          duration: 600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+
+    return () => {
+      loop.stop();
+      streamSubPulse.stopAnimation();
+      streamSubPulse.setValue(0);
+    };
+  }, [streamStatus, streamSubPulse]);
+
   const onChatEvent = useCallback(
     (payload: ChatEventPayload) => {
       if (activeRunIdRef.current && payload.runId !== activeRunIdRef.current) {
         return;
       }
 
+      const content = resolveHistoryMessageRecord(payload.message);
+      const resolvedContent = content ? resolveContentField(content) : payload.message;
+      const isToolResultFrame = content?.role === "toolResult";
+      const nextStatus = isToolResultFrame
+        ? resolveStatusFromToolResultRecord(content)
+        : resolveLiveStatusFromContent(resolvedContent);
+
       if (payload.state === "delta") {
-        const delta = extractTextFromUnknown(payload.message);
+        const delta = isToolResultFrame ? "" : extractDisplayTextFromContent(resolvedContent);
+        const statusToShow =
+          nextStatus.trim().length > 0
+            ? nextStatus
+            : delta.trim().length > 0
+              ? "chatting..."
+              : streamStatusRef.current || "thinking...";
+        setLiveStatus(statusToShow);
         if (delta.length > 0) {
           setStreamingText(delta);
+        }
+        if (delta.length > 0 || statusToShow.length > 0) {
           setIsStreaming(true);
           scrollToBottom(true);
         }
@@ -374,20 +639,30 @@ export function ChatScreen() {
       }
 
       if (payload.state === "final") {
-        const finalText = extractTextFromUnknown(payload.message) || streamTextRef.current;
+        const finalText = isToolResultFrame
+          ? streamTextRef.current
+          : extractDisplayTextFromContent(resolvedContent) || streamTextRef.current;
+        if (finalText.trim().length === 0 && nextStatus.trim().length > 0) {
+          setLiveStatus(nextStatus);
+          setIsStreaming(true);
+          scrollToBottom(true);
+          return;
+        }
         appendAssistantMessage(finalText);
         activeRunIdRef.current = null;
         setStreamingText("");
+        setLiveStatus("");
         setIsStreaming(false);
         scrollToBottom(true);
         return;
       }
 
       if (payload.state === "aborted") {
-        const finalText = extractTextFromUnknown(payload.message) || streamTextRef.current;
+        const finalText = extractDisplayTextFromContent(resolvedContent) || streamTextRef.current;
         appendAssistantMessage(finalText);
         activeRunIdRef.current = null;
         setStreamingText("");
+        setLiveStatus("");
         setIsStreaming(false);
         scrollToBottom(true);
         return;
@@ -396,11 +671,12 @@ export function ChatScreen() {
       if (payload.state === "error") {
         activeRunIdRef.current = null;
         setStreamingText("");
+        setLiveStatus("");
         setIsStreaming(false);
         setErrorMessage(payload.errorMessage ?? "Chat stream failed");
       }
     },
-    [appendAssistantMessage, scrollToBottom, setStreamingText],
+    [appendAssistantMessage, scrollToBottom, setLiveStatus, setStreamingText],
   );
 
   const loadModelCatalog = useCallback(async () => {
@@ -481,6 +757,7 @@ export function ChatScreen() {
     initialScrollDoneRef.current = false;
     contentHeightRef.current = 0;
     viewportHeightRef.current = 0;
+    setLiveStatus("");
 
     if (!sessionKey) {
       setErrorMessage("Session key is required. Please open chat from the sessions screen.");
@@ -558,7 +835,14 @@ export function ChatScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [cancelInitialScrollAnimation, initialSessionModel, onChatEvent, sessionKey, store]);
+  }, [
+    cancelInitialScrollAnimation,
+    initialSessionModel,
+    onChatEvent,
+    sessionKey,
+    setLiveStatus,
+    store,
+  ]);
 
   const sendMessage = useCallback(async () => {
     const service = chatServiceRef.current;
@@ -569,6 +853,7 @@ export function ChatScreen() {
 
     setErrorMessage("");
     setDraft("");
+    setLiveStatus("");
     setMessages((current) => [
       ...current,
       {
@@ -589,20 +874,23 @@ export function ChatScreen() {
 
       if (ack.status === "error") {
         activeRunIdRef.current = null;
+        setLiveStatus("");
         setIsStreaming(false);
         setErrorMessage(ack.summary);
         return;
       }
 
       activeRunIdRef.current = ack.runId;
+      setLiveStatus("thinking...");
       setIsStreaming(true);
     } catch (error) {
+      setLiveStatus("");
       setIsStreaming(false);
       setErrorMessage(error instanceof Error ? error.message : "Failed to send message");
     } finally {
       setIsSending(false);
     }
-  }, [draft, isSending, scrollToBottom, sessionKey]);
+  }, [draft, isSending, scrollToBottom, sessionKey, setLiveStatus]);
 
   const abortMessage = useCallback(async () => {
     const service = chatServiceRef.current;
@@ -614,10 +902,11 @@ export function ChatScreen() {
       activeRunIdRef.current = null;
       setIsStreaming(false);
       setStreamingText("");
+      setLiveStatus("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to abort run");
     }
-  }, [sessionKey, setStreamingText]);
+  }, [sessionKey, setLiveStatus, setStreamingText]);
 
   useEffect(() => {
     void initialize();
@@ -626,6 +915,7 @@ export function ChatScreen() {
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
       activeRunIdRef.current = null;
+      streamStatusRef.current = "";
       clientRef.current?.disconnect();
       clientRef.current = null;
       chatServiceRef.current = null;
@@ -737,21 +1027,31 @@ export function ChatScreen() {
                       <Text style={styles.metaTime}>{message.time}</Text>
                       {!isAssistant ? <Text style={styles.metaAuthor}>You</Text> : null}
                     </View>
-                    <View
-                      style={[
-                        styles.bubble,
-                        isAssistant ? styles.assistantBubble : styles.userBubble,
-                      ]}
-                    >
-                      <Text
+                    {message.body.trim().length > 0 ? (
+                      <View
                         style={[
-                          styles.bubbleText,
-                          isAssistant ? styles.assistantBubbleText : styles.userBubbleText,
+                          styles.bubble,
+                          isAssistant ? styles.assistantBubble : styles.userBubble,
                         ]}
                       >
-                        {message.body}
-                      </Text>
-                    </View>
+                        <Text
+                          style={[
+                            styles.bubbleText,
+                            isAssistant ? styles.assistantBubbleText : styles.userBubbleText,
+                          ]}
+                        >
+                          {message.body}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {isAssistant && message.activityStatus ? (
+                      <View style={styles.subEventsWrap}>
+                        <View style={[styles.subEventChip, styles.subEventLiveStatus]}>
+                          <View style={styles.subEventDot} />
+                          <Text style={styles.subEventText}>{message.activityStatus}</Text>
+                        </View>
+                      </View>
+                    ) : null}
                   </View>
                   {!isAssistant ? (
                     <View style={[styles.avatar, styles.avatarUser]}>
@@ -762,7 +1062,7 @@ export function ChatScreen() {
               );
             })}
 
-            {streamText.trim().length > 0 ? (
+            {streamText.trim().length > 0 || streamStatus.trim().length > 0 ? (
               <View style={[styles.messageRow, styles.messageRowLeft]}>
                 <Pressable
                   style={[styles.avatar, styles.avatarAssistant]}
@@ -775,11 +1075,27 @@ export function ChatScreen() {
                     <Text style={styles.metaAuthor}>OpenClaw</Text>
                     <Text style={styles.metaTime}>typing...</Text>
                   </View>
-                  <View style={[styles.bubble, styles.assistantBubble]}>
-                    <Text style={[styles.bubbleText, styles.assistantBubbleText]}>
-                      {streamText}
-                    </Text>
-                  </View>
+                  {streamStatus.trim().length > 0 ? (
+                    <Animated.View style={[styles.subEventsWrap, streamSubAnimatedStyle]}>
+                      <View
+                        style={[
+                          styles.subEventChip,
+                          styles.subEventLive,
+                          styles.subEventLiveStatus,
+                        ]}
+                      >
+                        <View style={[styles.subEventDot, styles.subEventDotLive]} />
+                        <Text style={styles.subEventText}>{streamStatus}</Text>
+                      </View>
+                    </Animated.View>
+                  ) : null}
+                  {streamText.trim().length > 0 ? (
+                    <View style={[styles.bubble, styles.assistantBubble]}>
+                      <Text style={[styles.bubbleText, styles.assistantBubbleText]}>
+                        {streamText}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             ) : null}
@@ -1087,6 +1403,46 @@ const styles = StyleSheet.create({
   },
   userBubbleText: {
     color: "#FFFFFF",
+  },
+  subEventsWrap: {
+    marginTop: 2,
+    gap: 6,
+  },
+  subEventChip: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    backgroundColor: "#F8FAFC",
+  },
+  subEventLiveStatus: {
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+  },
+  subEventLive: {
+    shadowColor: "#0EA5E9",
+    shadowOpacity: 0.15,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  subEventDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: "#64748B",
+  },
+  subEventDotLive: {
+    backgroundColor: "#0EA5E9",
+  },
+  subEventText: {
+    color: "#334155",
+    fontFamily: "SpaceGrotesk_500Medium",
+    fontSize: 11,
   },
   footer: {
     backgroundColor: "rgba(255, 255, 255, 0.96)",
