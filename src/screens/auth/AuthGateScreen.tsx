@@ -119,7 +119,7 @@ export function AuthGateScreen() {
         if (!mounted) {
           return;
         }
-        navigation.replace(isLoggedIn ? "internal/sessions" : "auth/login");
+        navigation.replace(isLoggedIn ? "internal/main" : "auth/login");
       } catch (error) {
         if (!mounted) {
           return;
