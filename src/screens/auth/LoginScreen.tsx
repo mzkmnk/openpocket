@@ -10,7 +10,8 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, SafeAreaView, ScrollView, Text, View } from "react-native";
+import { Platform, ScrollView, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { GatewayClient } from "../../core/gateway/GatewayClient";
 import {
