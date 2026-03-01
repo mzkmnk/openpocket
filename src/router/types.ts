@@ -5,5 +5,6 @@ export type RootStackParamList = {
   "internal/chat": {
     sessionKey?: string;
     sessionLabel?: string;
+    sessionModel?: string;
   };
 };

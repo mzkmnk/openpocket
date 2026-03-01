@@ -324,6 +324,7 @@ export function SessionsScreen() {
       navigation.navigate("internal/chat", {
         sessionKey: resolvedKey,
         sessionLabel: resolvedLabel,
+        sessionModel: target?.row.model ?? "",
       });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to create session");
@@ -449,6 +450,7 @@ export function SessionsScreen() {
                     navigation.navigate("internal/chat", {
                       sessionKey: item.key,
                       sessionLabel: item.label,
+                      sessionModel: item.row.model ?? "",
                     });
                   }}
                 >
