@@ -35,6 +35,7 @@ import type { ChatEventPayload } from "../../core/chat/types";
 import { GatewayClient } from "../../core/gateway/GatewayClient";
 import { ModelsService } from "../../core/models/ModelsService";
 import type { ModelChoice } from "../../core/models/types";
+import { useBottomSheetMotion } from "../../features/animation/useBottomSheetMotion";
 import { loadGatewayConnectionSecrets } from "../../core/security/connectionSecrets";
 import {
   loadOrCreateDeviceIdentity,
@@ -61,8 +62,6 @@ type GatewayFeatureFlags = {
   canListModels: boolean;
   canPatchSession: boolean;
 };
-
-const MODEL_SHEET_CLOSED_Y = 420;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -535,16 +534,13 @@ export function ChatScreen() {
     canPatchSession: false,
   });
   const streamSubPulse = useRef(new Animated.Value(0)).current;
-  const modelSheetTranslateY = useRef(new Animated.Value(MODEL_SHEET_CLOSED_Y)).current;
-  const modelBackdropOpacity = useMemo(
-    () =>
-      modelSheetTranslateY.interpolate({
-        inputRange: [0, MODEL_SHEET_CLOSED_Y],
-        outputRange: [1, 0],
-        extrapolate: "clamp",
-      }),
-    [modelSheetTranslateY],
-  );
+  const {
+    translateY: modelSheetTranslateY,
+    backdropOpacity: modelBackdropOpacity,
+    setClosedPosition: setModelSheetClosedPosition,
+    animateIn: animateModelModalIn,
+    animateOut: animateModelModalOut,
+  } = useBottomSheetMotion({ closedY: 420 });
   const streamSubAnimatedStyle = useMemo(
     () => ({
       opacity: streamSubPulse.interpolate({
@@ -563,31 +559,12 @@ export function ChatScreen() {
     [streamSubPulse],
   );
 
-  const animateModelModalIn = useCallback(() => {
-    modelSheetTranslateY.stopAnimation();
-    Animated.spring(modelSheetTranslateY, {
-      toValue: 0,
-      damping: 20,
-      stiffness: 260,
-      mass: 0.8,
-      useNativeDriver: true,
-    }).start();
-  }, [modelSheetTranslateY]);
-
   const closeModelPicker = useCallback(() => {
-    modelSheetTranslateY.stopAnimation();
-    Animated.timing(modelSheetTranslateY, {
-      toValue: MODEL_SHEET_CLOSED_Y,
-      duration: 180,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
-        setIsModelModalVisible(false);
-        modelSheetTranslateY.setValue(MODEL_SHEET_CLOSED_Y);
-      }
+    animateModelModalOut(() => {
+      setIsModelModalVisible(false);
+      setModelSheetClosedPosition();
     });
-  }, [modelSheetTranslateY]);
+  }, [animateModelModalOut, setModelSheetClosedPosition]);
 
   const cancelInitialScrollAnimation = useCallback(() => {
     if (initialScrollRafRef.current !== null) {
@@ -822,7 +799,7 @@ export function ChatScreen() {
       return;
     }
     setIsModelModalVisible(true);
-    modelSheetTranslateY.setValue(MODEL_SHEET_CLOSED_Y);
+    setModelSheetClosedPosition();
     requestAnimationFrame(() => {
       animateModelModalIn();
     });
@@ -835,7 +812,7 @@ export function ChatScreen() {
     modelFeatures.canListModels,
     modelFeatures.canPatchSession,
     modelOptions,
-    modelSheetTranslateY,
+    setModelSheetClosedPosition,
   ]);
 
   const selectModel = useCallback(
@@ -859,6 +836,7 @@ export function ChatScreen() {
     },
     [closeModelPicker, isSwitchingModel, sessionKey],
   );
+
 
   const initialize = useCallback(async () => {
     setIsLoading(true);
