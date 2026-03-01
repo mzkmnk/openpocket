@@ -50,6 +50,11 @@ Planned addition:
 - Tech stack: React Native (Expo) + TypeScript
 - Target backend: OpenClaw Gateway (WebSocket protocol)
 
+### Git Hooks (pre-commit)
+
+- This repository uses `lefthook` and runs `pnpm check` at `pre-commit`.
+- In `git worktree` workflows, hooks are installed per worktree metadata. Run `pnpm install` once in each new worktree to enable hooks there.
+
 ## License
 
 Proprietary (All rights reserved)

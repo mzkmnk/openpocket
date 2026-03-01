@@ -50,6 +50,11 @@ WebSocket 経由で OpenClaw Gateway に接続し、セッション単位の運�
 - 技術スタック: React Native (Expo) + TypeScript
 - 接続先: OpenClaw Gateway（WebSocket プロトコル）
 
+### Git Hooks（pre-commit）
+
+- このリポジトリでは `lefthook` を利用し、`pre-commit` で `pnpm check` を実行します。
+- `git worktree` 運用では、フックは worktree ごとのメタデータにインストールされます。新しい worktree を作成したら、その worktree 内で一度 `pnpm install` を実行してフックを有効化してください。
+
 ## ライセンス
 
 Proprietary（無断改変・無断公開禁止）
