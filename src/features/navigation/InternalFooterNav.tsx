@@ -1,4 +1,5 @@
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import { useFonts } from "expo-font";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 
@@ -12,6 +13,10 @@ const TAB_ITEMS: readonly {
 ];
 
 export function InternalFooterNav({ state, navigation, insets }: BottomTabBarProps) {
+  const [iconFontLoaded] = useFonts({
+    MaterialIcons: require("react-native-vector-icons/Fonts/MaterialIcons.ttf"),
+  });
+
   return (
     <View
       style={[
@@ -39,7 +44,11 @@ export function InternalFooterNav({ state, navigation, insets }: BottomTabBarPro
             accessibilityRole="button"
             accessibilityState={{ selected: isActive }}
           >
-            <MaterialIcons name={item.icon} size={20} color={isActive ? "#137FEC" : "#64748B"} />
+            {iconFontLoaded ? (
+              <MaterialIcons name={item.icon} size={20} color={isActive ? "#137FEC" : "#64748B"} />
+            ) : (
+              <View style={styles.iconPlaceholder} />
+            )}
             <Text style={[styles.tabLabel, isActive ? styles.tabLabelActive : null]}>
               {item.label}
             </Text>
@@ -68,6 +77,10 @@ const styles = StyleSheet.create({
     minHeight: 46,
     paddingVertical: 8,
     gap: 2,
+  },
+  iconPlaceholder: {
+    width: 20,
+    height: 20,
   },
   tabButtonActive: {
     backgroundColor: "#EFF6FF",
