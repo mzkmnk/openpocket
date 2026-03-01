@@ -7,6 +7,9 @@ import type {
   SessionsListResult,
   SessionsPatchParams,
   SessionsPatchResult,
+  SessionsResetParams,
+  SessionsResetReason,
+  SessionsResetResult,
 } from "./types";
 
 const SESSION_PINS_KEY = "openpocket.sessions.pins.v1";
@@ -148,6 +151,25 @@ export class SessionsService {
     const normalizedLabel = label === null ? null : label.trim().length === 0 ? null : label.trim();
     const params: SessionsPatchParams = { key, label: normalizedLabel };
     return this.requester.request<SessionsPatchResult>("sessions.patch", params);
+  }
+
+  /**
+   * Resets a session context through Gateway `sessions.reset`.
+   * Gateway `sessions.reset` を通じて session コンテキストをリセットします。
+   *
+   * @param key - Session key to reset or initialize.
+   *              リセットまたは初期化対象の session key。
+   * @param reason - Reset reason (`new` creates/initializes fresh context).
+   *                 リセット理由（`new` は新規/初期コンテキストを作成）。
+   * @returns Reset result from Gateway.
+   *          Gateway からの reset 結果。
+   */
+  async resetSession(
+    key: string,
+    reason: SessionsResetReason = "reset",
+  ): Promise<SessionsResetResult> {
+    const params: SessionsResetParams = { key, reason };
+    return this.requester.request<SessionsResetResult>("sessions.reset", params);
   }
 
   /**

@@ -28,6 +28,7 @@ class MockRequester {
   calls: Call[] = [];
   listPayload: unknown = { sessions: [] };
   patchPayload: unknown = { ok: true, key: "s1" };
+  resetPayload: unknown = { ok: true, key: "s1" };
 
   async request<T = unknown>(method: string, params?: unknown): Promise<T> {
     this.calls.push({ method, params });
@@ -36,6 +37,9 @@ class MockRequester {
     }
     if (method === "sessions.patch") {
       return this.patchPayload as T;
+    }
+    if (method === "sessions.reset") {
+      return this.resetPayload as T;
     }
     throw new Error(`Unexpected method: ${method}`);
   }
@@ -115,6 +119,20 @@ describe("SessionsService", () => {
     expect(requester.calls[1]).toEqual({
       method: "sessions.patch",
       params: { key: "s1", label: null },
+    });
+  });
+
+  // セッション新規初期化時に sessions.reset を reason:new で呼ぶこと
+  it("calls sessions.reset with reason new", async () => {
+    const requester = new MockRequester();
+    const store = new MemoryStore();
+    const service = new SessionsService(requester, store);
+
+    await service.resetSession("mobile-abc", "new");
+
+    expect(requester.calls[0]).toEqual({
+      method: "sessions.reset",
+      params: { key: "mobile-abc", reason: "new" },
     });
   });
 
