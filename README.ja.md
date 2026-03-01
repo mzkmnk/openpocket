@@ -32,8 +32,8 @@ WebSocket 経由で OpenClaw Gateway に接続し、セッション単位の運�
 
 現在のギャラリー（2枚）:
 
-| Sessions | Chat |
-| --- | --- |
+| Sessions                                  | Chat                              |
+| ----------------------------------------- | --------------------------------- |
 | ![Sessions screen](docs/img/sessions.png) | ![Chat screen](docs/img/chat.png) |
 
 追加予定:

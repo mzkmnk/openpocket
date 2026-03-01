@@ -32,8 +32,8 @@ The app connects to OpenClaw Gateway over WebSocket and focuses on session-based
 
 Current gallery (2 screenshots):
 
-| Sessions | Chat |
-| --- | --- |
+| Sessions                                  | Chat                              |
+| ----------------------------------------- | --------------------------------- |
 | ![Sessions screen](docs/img/sessions.png) | ![Chat screen](docs/img/chat.png) |
 
 Planned addition:
