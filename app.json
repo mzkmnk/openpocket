@@ -15,7 +15,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSFaceIDUsageDescription": "OpenPocket uses Face ID to protect your sessions."
-      }
+      },
+      "bundleIdentifier": "com.mzkmnk.openpocket.dev"
     },
     "android": {
       "adaptiveIcon": {
